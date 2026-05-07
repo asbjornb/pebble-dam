@@ -3,10 +3,17 @@
 // real rigid-body sim — just enough for stacks of pebbles, sticks bridging
 // two stones, and leaves draping over the rest.
 
-import { PIECE_TYPES, streamTangentAt } from "./state.js";
+import {
+  PIECE_TYPES,
+  streamTangentAt,
+  nearestStreamCenter,
+  piecePoints,
+  isInStream,
+} from "./state.js";
 
 const STACK_STEPS = 20;
 const TOUCH_SLACK = 4;
+const LAND_STEPS = 24;
 
 const MAX_TILT = {
   stick: 0.55,
@@ -80,5 +87,30 @@ export function settlePiece(piece, placed) {
     piece.rot = Math.atan2(tan.dx, -tan.dy);
   } else if (piece.type === "pebble") {
     piece.rot = (piece.rot ?? 0) * 0.4;
+  }
+
+  // Land-collision pass: treat the dry banks as a soft obstacle. If any
+  // sample along the piece's body falls on land, push the piece toward the
+  // stream centerline until it fits — or until we hit the iteration cap (a
+  // stick longer than the local stream stays put as a bridge). Only kicks
+  // in when the piece center is already in water; pieces fully on land are
+  // ground items, not floaters.
+  if (isInStream(piece.x, piece.y)) {
+    for (let step = 0; step < LAND_STEPS; step++) {
+      let worstDepth = 0;
+      let worst = null;
+      for (const s of piecePoints(piece)) {
+        if (isInStream(s.x, s.y)) continue;
+        const c = nearestStreamCenter(s.x, s.y);
+        const depth = Math.hypot(s.x - c.cx, s.y - c.cy);
+        if (depth > worstDepth) { worstDepth = depth; worst = { s, c }; }
+      }
+      if (!worst) break;
+      const dx = worst.c.cx - worst.s.x;
+      const dy = worst.c.cy - worst.s.y;
+      const len = Math.hypot(dx, dy) || 1;
+      piece.x += (dx / len) * 3;
+      piece.y += (dy / len) * 3;
+    }
   }
 }
