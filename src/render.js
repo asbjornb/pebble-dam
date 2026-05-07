@@ -1,7 +1,7 @@
 // Renders the world. Uses real images when assets are available; otherwise
 // falls back to procedural shapes so the game is playable without art.
 
-import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, streamTangentAt, isInStream } from "./state.js";
+import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, streamTangentAt } from "./state.js";
 import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
@@ -23,14 +23,15 @@ export function render(ctx, state, assets) {
   // top of the painted background so the stream looks alive.
   drawWaterEffects(ctx, state, assets);
 
+  // Drop ripples sit beneath the dropped piece — the rings spread out into
+  // the surrounding water rather than painting over the rock that's sitting
+  // proud of the surface.
+  drawRipples(ctx, state, assets);
+
   // Dam pieces in placement order.
   for (const p of state.placed) {
     drawPiece(ctx, p, assets);
   }
-
-  // Drop ripples sit above pieces so the rings read as water displaced
-  // around the stone, not hidden beneath it.
-  drawRipples(ctx, state, assets);
 
   // Drag preview.
   if (state.drag) {
@@ -240,7 +241,6 @@ function drawSimpleLeaf(ctx, x, y, rot) {
 function drawWaterEffects(ctx, state, assets) {
   const dam = computeDamState(state.placed);
   drawUpstreamPool(ctx, state.pressure ?? 0);
-  drawObstacleFlow(ctx, state, assets);
   drawLateralRuns(ctx, dam.lateral, state.t, state.pressure ?? 0);
   for (const j of dam.jets) {
     drawGapRush(ctx, j.x, j.y, j.width, j.strength, state.t);
@@ -273,97 +273,29 @@ function drawCaustics(ctx, state, assets) {
 
   const frames = a.frames || 8;
   const fs = a.frameSize || 256;
-  const fi = Math.floor(state.t * 9) % frames; // ~9 fps
+  // Crossfade between adjacent frames at ~2.5 fps — stepping discrete frames
+  // at higher rates flickers; blending hides the seams so the highlights
+  // breathe instead of strobing.
+  const phase = state.t * 2.5;
+  const fi = Math.floor(phase) % frames;
+  const fi2 = (fi + 1) % frames;
+  const blend = phase - Math.floor(phase);
   ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.18;
 
-  // Two oversized overlapping copies, stretched well beyond the canvas so
-  // their edges always land off-stream and never read as a visible rectangle.
-  // Slow drift in opposite directions keeps the highlight pattern moving.
-  const drift = state.t * 18;
-  const cw = 2000, chh = 1500;
-  ctx.drawImage(a.image, fi * fs, 0, fs, fs,
-    -300 + (drift % 80) - 40, -200 + ((drift * 0.6) % 60), cw, chh);
-  const fi2 = (fi + 3) % frames;
-  ctx.globalAlpha = 0.12;
-  ctx.drawImage(a.image, fi2 * fs, 0, fs, fs,
-    -400 - (drift % 80), -100 - ((drift * 0.4) % 50), cw, chh);
-  ctx.restore();
-}
-
-// Bow waves and trailing wakes for stationary pieces in the stream. This is
-// what reads as "water flowing around things" before the dam is sealed —
-// without it a half-built dam looks like inert rocks sitting in still water.
-function drawObstacleFlow(ctx, state, assets) {
-  const bow = assets?.bowWave;
-  const wake = assets?.wake;
-  ctx.save();
-  for (const p of state.placed) {
-    if (p.flowing) continue;
-    if (p.type !== "pebble" && p.type !== "stick") continue;
-    // Only pieces actually sitting in the wet stream displace water — bank
-    // items shouldn't sprout wakes on dry ground.
-    if (!isInStream(p.x, p.y)) continue;
-    const def = PIECE_TYPES[p.type];
-    const tan = streamTangentAt(p.x, p.y);
-    const nx = -tan.dy, ny = tan.dx;
-    const halfW = def.w / 2;
-    const angle = Math.atan2(tan.dy, tan.dx);
-
-    if (bow && bow.loaded) {
-      // Painted bow wave hugs the upstream face. Wide enough to flare past
-      // the piece on both sides so it reads even with the obstacle drawn on
-      // top.
-      const bw = def.w * 1.7;
-      const bh = bw * (bow.image.height / bow.image.width);
-      ctx.save();
-      ctx.translate(p.x - tan.dx * (halfW * 0.6), p.y - tan.dy * (halfW * 0.6));
-      ctx.rotate(angle + Math.PI / 2);
-      ctx.globalAlpha = 0.9;
-      ctx.drawImage(bow.image, -bw / 2, -bh * 0.85, bw, bh);
-      ctx.restore();
-    } else {
-      const bx = p.x - tan.dx * (halfW + 1);
-      const by = p.y - tan.dy * (halfW + 1);
-      ctx.save();
-      ctx.translate(bx, by);
-      ctx.rotate(angle);
-      ctx.strokeStyle = "rgba(255,255,255,0.42)";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.arc(0, 0, halfW * 0.95, Math.PI * 0.6, Math.PI * 1.4);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    if (wake && wake.loaded) {
-      // Painted wake fans straight downstream. The sprite's long axis points
-      // from its narrow tail to its wide head, so we orient it so the head
-      // sits behind the obstacle and the tail trails away downstream.
-      const wakeLen = def.w * 1.6 + 30;
-      const wakeH = wakeLen * (wake.image.height / wake.image.width);
-      ctx.save();
-      ctx.translate(p.x + tan.dx * halfW * 0.6, p.y + tan.dy * halfW * 0.6);
-      ctx.rotate(angle);
-      ctx.globalAlpha = 0.7;
-      ctx.drawImage(wake.image, 0, -wakeH / 2, wakeLen, wakeH);
-      ctx.restore();
-    } else {
-      ctx.strokeStyle = "rgba(255,255,255,0.22)";
-      ctx.lineWidth = 1.3;
-      const wakeLen = 55 + halfW;
-      for (const side of [-1, 1]) {
-        const sx = p.x + tan.dx * (halfW * 0.4) + nx * side * halfW * 0.7;
-        const sy = p.y + tan.dy * (halfW * 0.4) + ny * side * halfW * 0.7;
-        const cx = sx + tan.dx * wakeLen * 0.55 + nx * side * 10;
-        const cy = sy + tan.dy * wakeLen * 0.55 + ny * side * 10;
-        const ex = sx + tan.dx * wakeLen + nx * side * 3;
-        const ey = sy + tan.dy * wakeLen + ny * side * 3;
-        ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.quadraticCurveTo(cx, cy, ex, ey);
-        ctx.stroke();
-      }
+  // Tile a moderate-sized cell across the stream so the texture reads as
+  // shimmering surface rather than one giant stretched image. A slow drift
+  // keeps it from looking pinned to the bed.
+  const tile = 360;
+  const drift = state.t * 6;
+  const ox = -((drift) % tile) - tile;
+  const oy = -((drift * 0.4) % tile) - tile;
+  const baseAlpha = 0.14;
+  for (let ty = oy; ty < H + tile; ty += tile) {
+    for (let tx = ox; tx < W + tile; tx += tile) {
+      ctx.globalAlpha = baseAlpha * (1 - blend);
+      ctx.drawImage(a.image, fi * fs, 0, fs, fs, tx, ty, tile, tile);
+      ctx.globalAlpha = baseAlpha * blend;
+      ctx.drawImage(a.image, fi2 * fs, 0, fs, fs, tx, ty, tile, tile);
     }
   }
   ctx.restore();
