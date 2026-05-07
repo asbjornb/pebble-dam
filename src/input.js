@@ -121,8 +121,8 @@ function updateSnap() {
   const snapY = buildLineSnap(d.x);
   const distToDamLine = Math.abs(d.y - snapY);
   const onDam = distToDamLine < 90;
-  const tilt = Math.atan2(-30, 720); // matches BUILD_LINE slope, ~ -0.04 rad
-  if (onDam && d.x > 320 && d.x < 1120) {
+  const tilt = Math.atan2(-30, 680); // matches BUILD_LINE slope, ~ -0.044 rad
+  if (onDam && d.x > 320 && d.x < 1040) {
     d.snap = {
       x: d.x,
       y: snapY,
