@@ -1,7 +1,7 @@
 // Renders the world. Uses real images when assets are available; otherwise
 // falls back to procedural shapes so the game is playable without art.
 
-import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, streamTangentAt } from "./state.js";
+import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, streamTangentAt, isInStream } from "./state.js";
 import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
@@ -14,10 +14,14 @@ export function render(ctx, state, assets) {
     drawProceduralBackground(ctx, state.t);
   }
 
+  // Ambient animated caustics over the wet stream — keeps the surface alive
+  // even when nothing is happening.
+  drawCaustics(ctx, state, assets);
+
   // Animated water overlay (subtle ripple) on top of stream bed if no
   // pre-rendered background — otherwise we still draw light highlights on
   // top of the painted background so the stream looks alive.
-  drawWaterEffects(ctx, state);
+  drawWaterEffects(ctx, state, assets);
 
   // Dam pieces in placement order.
   for (const p of state.placed) {
@@ -233,59 +237,133 @@ function drawSimpleLeaf(ctx, x, y, rot) {
 
 // ---------- water effects (gap jets + foam) ----------
 
-function drawWaterEffects(ctx, state) {
+function drawWaterEffects(ctx, state, assets) {
   const dam = computeDamState(state.placed);
   drawUpstreamPool(ctx, state.pressure ?? 0);
-  drawObstacleFlow(ctx, state);
+  drawObstacleFlow(ctx, state, assets);
   drawLateralRuns(ctx, dam.lateral, state.t, state.pressure ?? 0);
   for (const j of dam.jets) {
     drawGapRush(ctx, j.x, j.y, j.width, j.strength, state.t);
   }
   drawEddies(ctx, state);
-  drawSplashes(ctx, state);
+  drawSplashes(ctx, state, assets);
+}
+
+// Slow-cycling caustic tile over the wet stream surface. Adds constant gentle
+// motion to the water so the scene never feels static. Clipped to the stream
+// path and screen-blended so it brightens highlights without flattening color.
+function drawCaustics(ctx, state, assets) {
+  const a = assets?.caustics;
+  if (!a || !a.loaded) return;
+  ctx.save();
+  // Clip to stream so the caustics never spill onto the banks.
+  const path = STREAM.path;
+  ctx.beginPath();
+  for (let i = 0; i < path.length; i++) {
+    const pt = path[i];
+    if (i === 0) ctx.moveTo(pt.x - pt.w / 2, pt.y);
+    else ctx.lineTo(pt.x - pt.w / 2, pt.y);
+  }
+  for (let i = path.length - 1; i >= 0; i--) {
+    const pt = path[i];
+    ctx.lineTo(pt.x + pt.w / 2, pt.y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  const frames = a.frames || 8;
+  const fs = a.frameSize || 256;
+  const fi = Math.floor(state.t * 9) % frames; // ~9 fps
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.18;
+
+  // Two oversized overlapping copies, stretched well beyond the canvas so
+  // their edges always land off-stream and never read as a visible rectangle.
+  // Slow drift in opposite directions keeps the highlight pattern moving.
+  const drift = state.t * 18;
+  const cw = 2000, chh = 1500;
+  ctx.drawImage(a.image, fi * fs, 0, fs, fs,
+    -300 + (drift % 80) - 40, -200 + ((drift * 0.6) % 60), cw, chh);
+  const fi2 = (fi + 3) % frames;
+  ctx.globalAlpha = 0.12;
+  ctx.drawImage(a.image, fi2 * fs, 0, fs, fs,
+    -400 - (drift % 80), -100 - ((drift * 0.4) % 50), cw, chh);
+  ctx.restore();
 }
 
 // Bow waves and trailing wakes for stationary pieces in the stream. This is
 // what reads as "water flowing around things" before the dam is sealed —
 // without it a half-built dam looks like inert rocks sitting in still water.
-function drawObstacleFlow(ctx, state) {
+function drawObstacleFlow(ctx, state, assets) {
+  const bow = assets?.bowWave;
+  const wake = assets?.wake;
   ctx.save();
   for (const p of state.placed) {
     if (p.flowing) continue;
     if (p.type !== "pebble" && p.type !== "stick") continue;
+    // Only pieces actually sitting in the wet stream displace water — bank
+    // items shouldn't sprout wakes on dry ground.
+    if (!isInStream(p.x, p.y)) continue;
     const def = PIECE_TYPES[p.type];
     const tan = streamTangentAt(p.x, p.y);
     const nx = -tan.dy, ny = tan.dx;
     const halfW = def.w / 2;
+    const angle = Math.atan2(tan.dy, tan.dx);
 
-    // Bow wave: thin bright crescent on the upstream face.
-    const bx = p.x - tan.dx * (halfW + 1);
-    const by = p.y - tan.dy * (halfW + 1);
-    ctx.save();
-    ctx.translate(bx, by);
-    ctx.rotate(Math.atan2(tan.dy, tan.dx));
-    ctx.strokeStyle = "rgba(255,255,255,0.42)";
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.arc(0, 0, halfW * 0.95, Math.PI * 0.6, Math.PI * 1.4);
-    ctx.stroke();
-    ctx.restore();
-
-    // Wake streaks: two curving lines fanning slightly outward downstream.
-    ctx.strokeStyle = "rgba(255,255,255,0.22)";
-    ctx.lineWidth = 1.3;
-    const wakeLen = 55 + halfW;
-    for (const side of [-1, 1]) {
-      const sx = p.x + tan.dx * (halfW * 0.4) + nx * side * halfW * 0.7;
-      const sy = p.y + tan.dy * (halfW * 0.4) + ny * side * halfW * 0.7;
-      const cx = sx + tan.dx * wakeLen * 0.55 + nx * side * 10;
-      const cy = sy + tan.dy * wakeLen * 0.55 + ny * side * 10;
-      const ex = sx + tan.dx * wakeLen + nx * side * 3;
-      const ey = sy + tan.dy * wakeLen + ny * side * 3;
+    if (bow && bow.loaded) {
+      // Painted bow wave hugs the upstream face. Wide enough to flare past
+      // the piece on both sides so it reads even with the obstacle drawn on
+      // top.
+      const bw = def.w * 1.7;
+      const bh = bw * (bow.image.height / bow.image.width);
+      ctx.save();
+      ctx.translate(p.x - tan.dx * (halfW * 0.6), p.y - tan.dy * (halfW * 0.6));
+      ctx.rotate(angle + Math.PI / 2);
+      ctx.globalAlpha = 0.9;
+      ctx.drawImage(bow.image, -bw / 2, -bh * 0.85, bw, bh);
+      ctx.restore();
+    } else {
+      const bx = p.x - tan.dx * (halfW + 1);
+      const by = p.y - tan.dy * (halfW + 1);
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.rotate(angle);
+      ctx.strokeStyle = "rgba(255,255,255,0.42)";
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.quadraticCurveTo(cx, cy, ex, ey);
+      ctx.arc(0, 0, halfW * 0.95, Math.PI * 0.6, Math.PI * 1.4);
       ctx.stroke();
+      ctx.restore();
+    }
+
+    if (wake && wake.loaded) {
+      // Painted wake fans straight downstream. The sprite's long axis points
+      // from its narrow tail to its wide head, so we orient it so the head
+      // sits behind the obstacle and the tail trails away downstream.
+      const wakeLen = def.w * 1.6 + 30;
+      const wakeH = wakeLen * (wake.image.height / wake.image.width);
+      ctx.save();
+      ctx.translate(p.x + tan.dx * halfW * 0.6, p.y + tan.dy * halfW * 0.6);
+      ctx.rotate(angle);
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(wake.image, 0, -wakeH / 2, wakeLen, wakeH);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.lineWidth = 1.3;
+      const wakeLen = 55 + halfW;
+      for (const side of [-1, 1]) {
+        const sx = p.x + tan.dx * (halfW * 0.4) + nx * side * halfW * 0.7;
+        const sy = p.y + tan.dy * (halfW * 0.4) + ny * side * halfW * 0.7;
+        const cx = sx + tan.dx * wakeLen * 0.55 + nx * side * 10;
+        const cy = sy + tan.dy * wakeLen * 0.55 + ny * side * 10;
+        const ex = sx + tan.dx * wakeLen + nx * side * 3;
+        const ey = sy + tan.dy * wakeLen + ny * side * 3;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.quadraticCurveTo(cx, cy, ex, ey);
+        ctx.stroke();
+      }
     }
   }
   ctx.restore();
@@ -481,18 +559,32 @@ function drawRipples(ctx, state, assets) {
   ctx.restore();
 }
 
-function drawSplashes(ctx, state) {
+function drawSplashes(ctx, state, assets) {
   if (!state.splashes?.length) return;
+  const sheet = assets?.splashSheet;
   ctx.save();
   for (const s of state.splashes) {
     const k = s.age / s.life;
     if (k >= 1) continue;
-    const r = (s.big ? 22 : 6) * (0.4 + 0.9 * k);
-    ctx.globalAlpha = (1 - k) * (s.big ? 0.85 : 0.7);
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.beginPath();
-    ctx.arc(s.x, s.y - k * (s.big ? 30 : 14), r, 0, Math.PI * 2);
-    ctx.fill();
+    if (sheet && sheet.loaded) {
+      const frames = sheet.frames || 8;
+      const fs = sheet.frameSize || 128;
+      const fi = Math.min(frames - 1, Math.floor(k * frames));
+      const size = s.big ? 160 : 70;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 1.4);
+      ctx.drawImage(
+        sheet.image,
+        fi * fs, 0, fs, fs,
+        s.x - size / 2, s.y - size * 0.85, size, size
+      );
+    } else {
+      const r = (s.big ? 22 : 6) * (0.4 + 0.9 * k);
+      ctx.globalAlpha = (1 - k) * (s.big ? 0.85 : 0.7);
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.beginPath();
+      ctx.arc(s.x, s.y - k * (s.big ? 30 : 14), r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }
