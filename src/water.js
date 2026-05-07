@@ -12,6 +12,14 @@ import {
   streamTangentAt,
 } from "./state.js";
 
+// Pieces dropped on land never count as part of the dam, never burst, and
+// don't emit water particles. We do an isInStream sample at the piece center
+// for these checks. Cheap because the binary stream map is just an array
+// lookup once initStreamColorModel has run.
+function pieceInWater(p) {
+  return isInStream(p.x, p.y);
+}
+
 // ---------- dam coverage / gap flow ----------
 
 const GAP_RESOLUTION = 48; // sample columns across the build line
@@ -348,6 +356,10 @@ function tryBurst(state, dt) {
     if (!def) continue;
     const lineY = buildLineSnap(q.x);
     if (Math.abs(q.y - lineY) > 60) continue;
+    // Only pieces actually in the water can be torn loose by pressure. Without
+    // this, a stick resting on the bank near the dam-line Y still qualifies
+    // and gets washed off the moment any pressure builds up.
+    if (!pieceInWater(q)) continue;
     const score = def.mass + Math.random() * 0.5; // tie-break randomly
     if (score < weakestScore) {
       weakestScore = score;
@@ -377,6 +389,7 @@ function spawnEddies(state, dt) {
   for (const p of state.placed) {
     if (p.flowing) continue;
     if (p.type !== "pebble" && p.type !== "stick") continue;
+    if (!pieceInWater(p)) continue;
     if (Math.random() > dt * 5) continue;
     const tan = streamTangentAt(p.x, p.y);
     const def = PIECE_TYPES[p.type];
