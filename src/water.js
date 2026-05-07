@@ -171,6 +171,13 @@ const OFFSCREEN_PAD = 80;
 const LEAF_SPAWN_MIN = 4.0;        // min seconds between auto-spawned drifters
 const LEAF_SPAWN_MAX = 8.0;        // max seconds between auto-spawned drifters
 
+// How strongly each piece type pushes passing drifters sideways. Pebbles
+// are solid blockers and shove flow around them; sticks are long and thin
+// so water slips past with barely a nudge, which is what lets a stick
+// across the stream catch leaves instead of fanning them away; leaves sit
+// in between.
+const DEFLECT = { stick: 0.15, pebble: 1.0, leaf: 0.5 };
+
 export function updateFlow(state, dt) {
   spawnDrifters(state, dt);
 
@@ -202,7 +209,7 @@ export function updateFlow(state, dt) {
       const d = Math.hypot(dx, dy);
       if (d > range || d < 0.5) continue;
       const f = 1 - d / range;
-      const w = f * f * qdef.obstruction;
+      const w = f * f * (DEFLECT[q.type] ?? qdef.obstruction);
       // perp is the leaf's offset relative to the blocker; sign tells which
       // side to escape on. If perfectly aligned, pick a side at random so the
       // leaf commits instead of stalling in front of the stone.
@@ -236,16 +243,13 @@ export function updateFlow(state, dt) {
       continue;
     }
 
-    // Catch on stationary dam pieces — that's how leaves seal leaks. We only
-    // snag against pieces sitting on the dam line (otherwise leaves grab onto
-    // random stones placed off-dam) and use a tighter ellipse for leaves so
-    // they have to actually overlap, not just brush past.
+    // Catch on any stationary piece — players can build catchers off the
+    // dam line if they want. Tighter ellipse for leaves so a graze doesn't
+    // count as a stick.
     let snagged = false;
     for (const q of placed) {
       if (q === p || q.flowing) continue;
       const defq = PIECE_TYPES[q.type];
-      const qLineY = buildLineSnap(q.x);
-      if (Math.abs(q.y - qLineY) > 60) continue;
       const catchScale = p.type === "leaf" ? 0.26 : 0.34;
       const rx = (defp.w + defq.w) * catchScale;
       const ry = (defp.h + defq.h) * catchScale;
