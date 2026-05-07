@@ -390,6 +390,38 @@ function spawnDrifters(state, dt) {
 
 // ---------- bursts ----------
 
+// How tightly a piece is bracketed by stones across the flow. A stick laid
+// between two pebbles has stones at both cross-flow ends; water hits the
+// stick, gets redirected around the stones, and can't lever the stick free.
+// Returns 0 (not wedged) up to 1 (snugly bracketed on both sides).
+function wedgeFactor(piece, placed) {
+  const def = PIECE_TYPES[piece.type];
+  if (!def) return 0;
+  const tan = streamTangentAt(piece.x, piece.y);
+  const nx = -tan.dy, ny = tan.dx;
+  const idealPerp = def.w / 2;
+  const tolPerp = def.w * 0.5 + 20;     // how off-target the stone may sit
+  const tolAlong = def.h * 0.6 + 24;    // how far up/downstream is still wedging
+  let left = 0, right = 0;
+  for (const q of placed) {
+    if (q === piece || q.flowing) continue;
+    if (q.type !== "pebble") continue;
+    const qdef = PIECE_TYPES[q.type];
+    const dx = q.x - piece.x, dy = q.y - piece.y;
+    const along = dx * tan.dx + dy * tan.dy;
+    const perp = dx * nx + dy * ny;
+    if (Math.abs(along) > tolAlong + qdef.h / 2) continue;
+    const offset = Math.abs(Math.abs(perp) - idealPerp);
+    if (offset > tolPerp) continue;
+    const fitPerp = 1 - offset / tolPerp;
+    const fitAlong = 1 - Math.abs(along) / (tolAlong + qdef.h / 2);
+    const closeness = fitPerp * fitAlong;
+    if (perp < 0) left = Math.max(left, closeness);
+    else right = Math.max(right, closeness);
+  }
+  return Math.min(left, right);
+}
+
 // Pressure pops the weakest stuck piece downstream. Pebbles never burst.
 function tryBurst(state, dt) {
   const p = state.pressure;
@@ -407,7 +439,13 @@ function tryBurst(state, dt) {
     if (!def) continue;
     // Only pieces actually in the water can be torn loose by pressure.
     if (!pieceInWater(q)) continue;
-    const score = def.mass + Math.random() * 0.5; // tie-break randomly
+    const wedge = wedgeFactor(q, state.placed);
+    // A wedged piece only gives way once the rest of the stream is nearly
+    // sealed and there's nowhere else for water to go — at that point it
+    // gets lifted over the stones rather than levered through them.
+    const lift = 0.7 + wedge * 0.25;
+    if (wedge > 0.15 && p < lift) continue;
+    const score = def.mass + wedge * 8 + Math.random() * 0.5;
     if (score < weakestScore) {
       weakestScore = score;
       weakest = q;
