@@ -1,7 +1,7 @@
 // Pointer input: drag pieces from the palette into the stream, and drag
 // previously-placed pieces to reposition them.
 
-import { W, PIECE_TYPES, isInStream, buildLineSnap } from "./state.js";
+import { W, H, PIECE_TYPES, isInStream, buildLineSnap } from "./state.js";
 import { isDamComplete } from "./water.js";
 
 let canvas, state;
