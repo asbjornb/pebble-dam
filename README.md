@@ -51,6 +51,8 @@ screenshot). The canvas scales to fit the viewport. All asset sizes in
 
 ## Roadmap
 
+See [`TODO.md`](TODO.md) for a running list of ideas to explore.
+
 - Multiple levels with different stream shapes and target objectives
   (e.g. "redirect water to the right channel", "make the pond deepen").
 - Real water simulation (cellular fluid) instead of analytical gap math.
