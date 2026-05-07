@@ -11,7 +11,11 @@ export const ASSETS = {
   piecePebble:   { src: "assets/piece-pebble.png" },
   pieceLeaf:     { src: "assets/piece-leaf.png" },
   splash:        { src: "assets/splash.png" },
-  dropRipple:    { src: "assets/drop-ripple.png", frames: 6, frameSize: 128 },
+  dropRipple:    { src: "assets/drop-ripple.png", frames: 6, frameSize: 160 },
+  splashSheet:   { src: "assets/splash-sheet.png", frames: 8, frameSize: 128 },
+  bowWave:       { src: "assets/bow-wave.png" },
+  wake:          { src: "assets/wake.png" },
+  caustics:      { src: "assets/water-caustics.png", frames: 8, frameSize: 256 },
 };
 
 export async function loadAssets() {
