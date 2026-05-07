@@ -1,7 +1,7 @@
 // Pointer input: pick up pieces (ground items, placed dam pieces, or
 // drifters floating past) and drop them somewhere new.
 
-import { W, H, PIECE_TYPES, isInStream } from "./state.js";
+import { W, H, PIECE_TYPES, isInStream, piecePoints } from "./state.js";
 import { settlePiece } from "./physics.js";
 
 let canvas, state;
@@ -62,7 +62,11 @@ function onUp(e) {
     x: d.x, y: d.y, rot: d.rot ?? 0,
     flowing: false,
   };
-  if (isInStream(d.x, d.y) && shouldFlow(d.type, d.x, d.y, state.placed)) {
+  // Only auto-drift if the whole footprint is in water. A stick whose end
+  // overhangs the bank goes through settlePiece instead, which pushes it
+  // off the land so it doesn't float half-beached.
+  const fullyWet = isInStream(d.x, d.y) && piecePoints(piece).every((s) => isInStream(s.x, s.y));
+  if (fullyWet && shouldFlow(d.type, d.x, d.y, state.placed)) {
     piece.flowing = true;
   } else {
     settlePiece(piece, state.placed);

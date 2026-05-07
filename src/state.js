@@ -289,6 +289,54 @@ export function streamTangentAt(x, y) {
   return bestTan;
 }
 
+// Closest point on the analytic stream centerline to (x,y). Used to push
+// pieces out of land toward water — the binary stream map is great for
+// in/out tests but doesn't give a direction, so we steer with the path.
+export function nearestStreamCenter(x, y) {
+  const path = STREAM.path;
+  let bestD = Infinity;
+  let best = { cx: x, cy: y };
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) continue;
+    let t = ((x - a.x) * dx + (y - a.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a.x + t * dx, cy = a.y + t * dy;
+    const d = Math.hypot(x - cx, y - cy);
+    if (d < bestD) { bestD = d; best = { cx, cy }; }
+  }
+  return best;
+}
+
+// Sample points along a piece's body in world space, accounting for its
+// rotation. Used for land-collision tests: if any sample falls on dry pixels,
+// the piece is overhanging the bank. Sticks sample along their long axis,
+// pebbles/leaves sample center + footprint corners.
+export function piecePoints(piece) {
+  const def = PIECE_TYPES[piece.type];
+  if (!def) return [{ x: piece.x, y: piece.y }];
+  const c = Math.cos(piece.rot ?? 0);
+  const s = Math.sin(piece.rot ?? 0);
+  const hw = Math.max(0, def.w / 2 - 6);
+  const hh = Math.max(0, def.h / 2 - 6);
+  if (piece.type === "stick") {
+    const pts = [];
+    for (let t = -1; t <= 1.0001; t += 0.5) {
+      pts.push({ x: piece.x + c * hw * t, y: piece.y + s * hw * t });
+    }
+    return pts;
+  }
+  return [
+    { x: piece.x, y: piece.y },
+    { x: piece.x + c * hw - s * hh, y: piece.y + s * hw + c * hh },
+    { x: piece.x + c * hw + s * hh, y: piece.y + s * hw - c * hh },
+    { x: piece.x - c * hw - s * hh, y: piece.y - s * hw + c * hh },
+    { x: piece.x - c * hw + s * hh, y: piece.y - s * hw - c * hh },
+  ];
+}
+
 // Sample stations along the stream centerline at fixed arc-length spacing.
 // Each station defines a cross-section (centered on the path, oriented
 // perpendicular to local flow) used by the water sim to detect dam coverage.

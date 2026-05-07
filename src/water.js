@@ -9,7 +9,18 @@ import {
   isInStream,
   streamTangentAt,
   streamStations,
+  piecePoints,
 } from "./state.js";
+
+// True if any sample along the piece's body falls on dry land. Used to
+// snag drifters against the bank — same role as colliding with another
+// stuck piece.
+function pieceTouchesLand(p) {
+  for (const s of piecePoints(p)) {
+    if (!isInStream(s.x, s.y)) return true;
+  }
+  return false;
+}
 
 // Pieces dropped on land never count as part of the dam, never burst, and
 // don't emit water particles. We do an isInStream sample at the piece center
@@ -315,6 +326,14 @@ export function updateFlow(state, dt) {
       }
     }
     if (snagged) continue;
+
+    // Banks are obstacles too: if the drifter's body has crossed the
+    // wet/dry boundary, snag it where it hit. Without this a leaf could
+    // skim along the bank with one half on land.
+    if (pieceTouchesLand(p)) {
+      p.flowing = false;
+      continue;
+    }
   }
 
   // Pressure (smoothed) and burst events.
