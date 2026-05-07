@@ -108,7 +108,9 @@ function shouldFlow(type, x, y, placed) {
     const dy = y - q.y;
     const rx = (def.w + qdef.w) * 0.45;
     const ry = (def.h + qdef.h) * 0.45;
-    if (Math.abs(dx) < rx && Math.abs(dy) < ry) return false;
+    const ex = dx / rx;
+    const ey = dy / ry;
+    if (ex * ex + ey * ey < 1) return false;
   }
   return true;
 }
