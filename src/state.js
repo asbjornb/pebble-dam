@@ -39,46 +39,16 @@ export const PIECE_TYPES = {
 
 export function makeInitialState() {
   return {
-    // pieces already placed in the world (the partial dam visible in the
-    // screenshot is generated on first run for atmosphere)
-    placed: seedDam(),
-    // available pieces in the bottom-left palette (infinite supply for v1)
+    placed: [],
     palette: [
       { id: "stick",  count: Infinity },
       { id: "pebble", count: Infinity },
       { id: "leaf",   count: Infinity },
     ],
-    // current drag (null when nothing is being dragged)
     drag: null,
-    // hint state
     showHint: true,
-    // win state
-    won: false,
-    winT: 0,
-    // global animation time (seconds)
     t: 0,
   };
-}
-
-function seedDam() {
-  // Approximate the partially-built dam from the screenshot so first-time
-  // players see a starting state similar to the reference.
-  const seed = [
-    { type: "stick",  x: 410, y: 540, rot:  0.05 },
-    { type: "pebble", x: 470, y: 555 },
-    { type: "stick",  x: 520, y: 530, rot: -0.02 },
-    { type: "pebble", x: 575, y: 540 },
-    { type: "stick",  x: 625, y: 520, rot:  0.03 },
-    { type: "leaf",   x: 540, y: 600, rot: -0.4 },
-    { type: "pebble", x: 690, y: 525 },
-    { type: "stick",  x: 745, y: 510, rot: -0.04 },
-    { type: "pebble", x: 800, y: 500 },
-    { type: "leaf",   x: 720, y: 575, rot:  0.3 },
-    { type: "stick",  x: 855, y: 495, rot:  0.06 },
-    { type: "pebble", x: 905, y: 485 },
-    { type: "pebble", x: 955, y: 478 },
-  ];
-  return seed.map((p, i) => ({ id: "seed-" + i, ...p, rot: p.rot ?? 0 }));
 }
 
 // Returns true if (x,y) is inside the wet stream band.
