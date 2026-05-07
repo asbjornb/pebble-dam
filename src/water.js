@@ -297,8 +297,13 @@ export function updateFlow(state, dt) {
       pushAlong -= w * 0.35;
     }
 
-    // Speed scales with type — leaves are light, sticks heavier.
-    const baseSpeed = FLOW_SPEED * (p.type === "stick" ? 0.85 : 1) *
+    // Speed scales with type — leaves are light, sticks heavier. The stream
+    // is much narrower at the head, so flow runs faster there: a venturi-style
+    // boost that fades out by the time the river has fanned wide. The faster
+    // current pushes drifters past the lumpy upper banks before sideways
+    // wobble has time to wedge them in.
+    const topRush = 1 + 0.5 * Math.max(0, 1 - p.y / 300);
+    const baseSpeed = FLOW_SPEED * topRush * (p.type === "stick" ? 0.85 : 1) *
       (1 + 0.25 * Math.sin(tnow * 1.7 + (p.phase ?? 0)));
     const speed = baseSpeed * Math.max(0.3, 1 + pushAlong);
     const sideSpeed = baseSpeed * pushPerp * 2.4;
