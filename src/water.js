@@ -30,6 +30,18 @@ function pieceInWater(p) {
   return isInStream(p.x, p.y);
 }
 
+// Stricter than pieceInWater: the center must be wet and a majority of body
+// samples must be in the stream. Used for burst eligibility so a piece mostly
+// on land is anchored, while a stick with one end grazing the bank is still
+// fair game for the current to tear loose.
+function pieceMostlyInWater(p) {
+  if (!isInStream(p.x, p.y)) return false;
+  const pts = piecePoints(p);
+  let wet = 0;
+  for (const s of pts) if (isInStream(s.x, s.y)) wet++;
+  return wet * 2 > pts.length;
+}
+
 // ---------- dam coverage / gap flow ----------
 
 const STATION_STEP = 40;        // arc-length spacing between sampled stations
@@ -437,8 +449,10 @@ function tryBurst(state, dt) {
     if (q.type === "pebble") continue; // stones don't burst
     const def = PIECE_TYPES[q.type];
     if (!def) continue;
-    // Only pieces actually in the water can be torn loose by pressure.
-    if (!pieceInWater(q)) continue;
+    // Only pieces mostly in the water can be torn loose by pressure. A piece
+    // sitting largely on land is anchored by the bank and shouldn't float off,
+    // even if its center pixel happens to be classified as water.
+    if (!pieceMostlyInWater(q)) continue;
     const wedge = wedgeFactor(q, state.placed);
     // A wedged piece only gives way once the rest of the stream is nearly
     // sealed and there's nowhere else for water to go — at that point it
