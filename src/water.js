@@ -66,6 +66,7 @@ export function computeDamState(placed) {
 
     for (const p of placed) {
       if (p.flowing) continue;
+      if (!pieceInWater(p)) continue;
       const def = PIECE_TYPES[p.type];
       if (!def) continue;
       // Project piece center into station-local frame: along = downstream,
