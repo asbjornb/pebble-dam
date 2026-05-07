@@ -10,3 +10,4 @@ Ideas to explore for future iterations of pebble-dam.
 - [ ] Consider adding a game mechanic / victory condition of some sort.
 - [ ] Consider multiple levels.
 - [ ] Consider different light over the course of the day.
+- [ ] Multiple maps with different feel and materials (may need an editor to draw masks).
