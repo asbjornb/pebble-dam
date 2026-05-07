@@ -1,7 +1,7 @@
 // Renders the world. Uses real images when assets are available; otherwise
 // falls back to procedural shapes so the game is playable without art.
 
-import { W, H, STREAM, PIECE_TYPES, streamTangentAt } from "./state.js";
+import { W, H, STREAM, PIECE_TYPES, streamTangentAt, isInStream } from "./state.js";
 import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
@@ -27,6 +27,11 @@ export function render(ctx, state, assets) {
   // the surrounding water rather than painting over the rock that's sitting
   // proud of the surface.
   drawRipples(ctx, state, assets);
+
+  // Streamlines bending around each stationary stone/stick: bow cushion on
+  // the upstream face, scrolling streaks past the sides. Drawn under pieces
+  // so the rock visually sits in the current.
+  drawStoneCurrents(ctx, state);
 
   // Dam pieces in placement order.
   for (const p of state.placed) {
@@ -482,6 +487,129 @@ function drawRipples(ctx, state, assets) {
       ctx.beginPath();
       ctx.ellipse(r.x, r.y, r.radius * (0.3 + k * 0.9), r.radius * 0.55 * (0.3 + k * 0.9), 0, 0, Math.PI * 2);
       ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// Procedural currents around each stationary stone or stick: a bow cushion
+// hugging the upstream face plus streamlines that bulge outward as they
+// pass the obstacle. The streaks scroll downstream so the eye reads "water
+// flowing past this rock" rather than decoration on it.
+function drawStoneCurrents(ctx, state) {
+  for (const p of state.placed) {
+    if (p.flowing) continue;
+    if (p.type !== "pebble" && p.type !== "stick") continue;
+    if (!isInStream(p.x, p.y)) continue;
+    drawCurrentsForPiece(ctx, p, state.t);
+  }
+}
+
+function drawCurrentsForPiece(ctx, p, t) {
+  const def = PIECE_TYPES[p.type];
+  const tan = streamTangentAt(p.x, p.y);
+  const angle = Math.atan2(tan.dy, tan.dx);
+
+  // Project the piece's body onto the local flow frame. A stick aligned with
+  // the current has a tiny cross-section and barely deflects flow; a stick
+  // perpendicular to it carves a much wider bow wave.
+  let crossHalf, alongHalf;
+  if (p.type === "stick") {
+    const rc = Math.cos(p.rot ?? 0);
+    const rs = Math.sin(p.rot ?? 0);
+    const nxw = -tan.dy, nyw = tan.dx;
+    const longTan  = rc * tan.dx + rs * tan.dy;
+    const longNorm = rc * nxw    + rs * nyw;
+    const shortTan  = -rs * tan.dx + rc * tan.dy;
+    const shortNorm = -rs * nxw    + rc * nyw;
+    crossHalf = Math.abs(def.w / 2 * longNorm) + Math.abs(def.h / 2 * shortNorm);
+    alongHalf = Math.abs(def.w / 2 * longTan)  + Math.abs(def.h / 2 * shortTan);
+  } else {
+    crossHalf = def.w / 2;
+    alongHalf = def.h / 2;
+  }
+  crossHalf = Math.max(crossHalf, 14);
+  alongHalf = Math.max(alongHalf, 14);
+
+  // Per-piece phase so neighbouring stones don't pulse in lockstep.
+  const seed = Math.floor(p.x * 0.13 + p.y * 0.07);
+
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(angle);
+  drawBowCushion(ctx, alongHalf, crossHalf, t, seed);
+  drawStreamlines(ctx, alongHalf, crossHalf, t, seed);
+  ctx.restore();
+}
+
+function drawBowCushion(ctx, alongHalf, crossHalf, t, seed) {
+  const pulse = 0.6 + 0.3 * Math.sin(t * 1.6 + seed * 0.1);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(210, 235, 255, ${0.28 * pulse})`;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-alongHalf - 2, -crossHalf * 0.85);
+  ctx.quadraticCurveTo(-alongHalf - 9, 0, -alongHalf - 2, crossHalf * 0.85);
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(255, 255, 255, ${0.22 * pulse})`;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-alongHalf - 0.5, -crossHalf * 0.6);
+  ctx.quadraticCurveTo(-alongHalf - 5, 0, -alongHalf - 0.5, crossHalf * 0.6);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawStreamlines(ctx, alongHalf, crossHalf, t, seed) {
+  // Gaussian deflection: streaklines bulge outward most at the obstacle and
+  // relax back to straight lines well upstream / downstream. sigma controls
+  // how concentrated the disturbance is along the flow.
+  const sigma = Math.max(crossHalf, 22);
+  const xStart = -alongHalf - sigma * 1.3;
+  const xEnd   =  alongHalf + sigma * 2.4;
+  const range  = xEnd - xStart;
+
+  // Each band is one lateral offset; closer-in lines bulge more.
+  const bands = [
+    { y0: crossHalf * 1.05, D: crossHalf * 0.55, count: 3, alpha: 0.55 },
+    { y0: crossHalf * 1.50, D: crossHalf * 0.35, count: 2, alpha: 0.40 },
+    { y0: crossHalf * 2.05, D: crossHalf * 0.20, count: 2, alpha: 0.28 },
+  ];
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const band of bands) {
+    for (const side of [-1, 1]) {
+      const y0 = side * band.y0;
+      const D  = side * band.D;
+      for (let i = 0; i < band.count; i++) {
+        const phase = (i + 0.5) / band.count + seed * 0.0173 + (side > 0 ? 0.5 : 0);
+        const speed = 0.42;
+        const u = ((t * speed + phase) % 1 + 1) % 1;
+        const x = xStart + u * range;
+        const fall = Math.exp(-(x * x) / (sigma * sigma));
+        const y = y0 + D * fall;
+        // dy/dx of the streamline, used to orient the streak along its path.
+        const dy = D * (-2 * x / (sigma * sigma)) * fall;
+        const segAngle = Math.atan2(dy, 1);
+        // Fade in at entry, out at exit, so streaks materialize/dissolve
+        // rather than popping at the edges of their travel.
+        const fade = Math.sin(u * Math.PI);
+        const alpha = band.alpha * fade;
+        if (alpha < 0.03) continue;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(segAngle);
+        const len = 14;
+        const grd = ctx.createLinearGradient(-len / 2, 0, len / 2, 0);
+        grd.addColorStop(0,   "rgba(235,245,255,0)");
+        grd.addColorStop(0.5, `rgba(235,245,255,${alpha})`);
+        grd.addColorStop(1,   "rgba(235,245,255,0)");
+        ctx.fillStyle = grd;
+        ctx.fillRect(-len / 2, -0.9, len, 1.8);
+        ctx.restore();
+      }
     }
   }
   ctx.restore();
