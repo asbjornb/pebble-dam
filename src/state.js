@@ -82,6 +82,7 @@ export function makeInitialState() {
     leafSpawnT: 0,
     eddies: [],
     splashes: [],
+    ripples: [],
   };
 }
 

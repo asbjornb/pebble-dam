@@ -75,7 +75,23 @@ function onUp(e) {
   };
   if (!piece.flowing) settlePiece(piece, state.placed);
   state.placed.push(piece);
+  spawnDropRipple(state, piece);
   state.drag = null;
+}
+
+function spawnDropRipple(state, piece) {
+  if (piece.type !== "pebble" && piece.type !== "stick") return;
+  if (!isInStream(piece.x, piece.y)) return;
+  const def = PIECE_TYPES[piece.type];
+  // Heavier pieces make a wider ripple. Diameter at peak ~ 1.6× the piece size.
+  const radius = Math.max(def.w, def.h) * 0.85;
+  state.ripples.push({
+    x: piece.x,
+    y: piece.y,
+    age: 0,
+    life: 0.6,
+    radius,
+  });
 }
 
 // Sticks and leaves dropped off the dam line drift with the current; pebbles

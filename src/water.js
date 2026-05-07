@@ -289,6 +289,16 @@ export function updateFlow(state, dt) {
   spawnEddies(state, dt);
   ageSplashes(state, dt);
   spawnSplashesFor(state, dam.jets);
+  ageRipples(state, dt);
+}
+
+function ageRipples(state, dt) {
+  if (!state.ripples) return;
+  for (let i = state.ripples.length - 1; i >= 0; i--) {
+    const r = state.ripples[i];
+    r.age += dt;
+    if (r.age >= r.life) state.ripples.splice(i, 1);
+  }
 }
 
 // ---------- drifters ----------
