@@ -43,14 +43,36 @@ export const PIECE_TYPES = {
   leaf:   { w: 110, h: 70, label: "Leaf",   obstruction: 0.35, mass: 0.4 },
 };
 
+// Items the player finds scattered on the dry banks at the start of the
+// level. The player picks these up and drags them into the stream to build
+// the dam; sticks and leaves also drift in renewably from upstream.
+const GROUND_ITEMS = [
+  // left bank, near and below the dam line
+  { type: "pebble", x: 210,  y: 470, rot:  0.15 },
+  { type: "pebble", x: 250,  y: 380, rot: -0.10 },
+  { type: "pebble", x: 180,  y: 580, rot:  0.30 },
+  { type: "pebble", x: 220,  y: 720, rot: -0.05 },
+  { type: "stick",  x: 200,  y: 320, rot:  0.4  },
+  { type: "stick",  x: 140,  y: 660, rot: -0.5  },
+  // right bank, near and above the dam line
+  { type: "pebble", x: 1180, y: 460, rot:  0.20 },
+  { type: "pebble", x: 1240, y: 360, rot: -0.18 },
+  { type: "pebble", x: 1280, y: 540, rot:  0.05 },
+  { type: "stick",  x: 1340, y: 440, rot: -0.6  },
+  { type: "stick",  x: 1380, y: 700, rot:  1.1  },
+];
+
 export function makeInitialState() {
+  const placed = GROUND_ITEMS.map((g) => ({
+    id: "g-" + Math.random().toString(36).slice(2, 8),
+    type: g.type,
+    x: g.x,
+    y: g.y,
+    rot: g.rot,
+    flowing: false,
+  }));
   return {
-    placed: [],
-    palette: [
-      { id: "stick",  count: Infinity },
-      { id: "pebble", count: Infinity },
-      { id: "leaf",   count: Infinity },
-    ],
+    placed,
     drag: null,
     showHint: true,
     t: 0,

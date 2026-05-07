@@ -1,5 +1,5 @@
-// Pointer input: drag pieces from the palette into the stream, and drag
-// previously-placed pieces to reposition them.
+// Pointer input: pick up pieces (ground items, placed dam pieces, or
+// drifters floating past) and drop them somewhere new.
 
 import { W, H, PIECE_TYPES, isInStream, buildLineSnap } from "./state.js";
 import { settlePiece } from "./physics.js";
@@ -27,34 +27,12 @@ function onDown(e) {
   const { x, y } = toLogical(e);
   state.showHint = false;
 
-  // Pick from palette?
-  const slots = state._paletteSlots || [];
-  for (const s of slots) {
-    if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) {
-      const def = PIECE_TYPES[s.type];
-      state.drag = {
-        type: s.type,
-        from: "palette",
-        x, y,
-        offsetX: 0,
-        offsetY: 0,
-        rot: s.type === "leaf" ? (Math.random() * 0.8 - 0.4) : 0,
-        snap: null,
-      };
-      updateSnap();
-      canvas.setPointerCapture(e.pointerId);
-      return;
-    }
-  }
-
-  // Pick existing placed piece?
   for (let i = state.placed.length - 1; i >= 0; i--) {
     const p = state.placed[i];
     const def = PIECE_TYPES[p.type];
     if (Math.abs(x - p.x) <= def.w / 2 && Math.abs(y - p.y) <= def.h / 2) {
       state.drag = {
         type: p.type,
-        from: "world",
         sourceId: p.id,
         x, y,
         offsetX: x - p.x,
@@ -82,32 +60,21 @@ function onMove(e) {
 function onUp(e) {
   if (!state.drag) return;
   const d = state.drag;
-  if (d.snap && d.snap.valid) {
-    const piece = {
-      id: "p-" + Math.random().toString(36).slice(2, 8),
-      type: d.type,
-      x: d.snap.x,
-      y: d.snap.y,
-      rot: d.snap.rot,
-      flowing: shouldFlow(d.type, d.snap.x, d.snap.y),
-    };
-    if (!piece.flowing) settlePiece(piece, state.placed);
-    state.placed.push(piece);
-  } else if (d.from === "world") {
-    // dropped invalid — return it to original location is hard without
-    // remembering it. For v1, drop at current pointer position if in stream,
-    // otherwise discard.
-    if (isInStream(d.x, d.y)) {
-      const piece = {
-        id: "p-" + Math.random().toString(36).slice(2, 8),
-        type: d.type,
-        x: d.x, y: d.y, rot: d.rot,
-        flowing: shouldFlow(d.type, d.x, d.y),
-      };
-      if (!piece.flowing) settlePiece(piece, state.placed);
-      state.placed.push(piece);
-    }
-  }
+  // Drops on the dam line use the snapped position; everywhere else (free
+  // float in the stream, or back on the dry bank) the piece keeps the
+  // pointer position.
+  const useSnap = d.snap && d.snap.valid;
+  const x = useSnap ? d.snap.x : d.x;
+  const y = useSnap ? d.snap.y : d.y;
+  const rot = useSnap ? d.snap.rot : d.rot;
+  const piece = {
+    id: "p-" + Math.random().toString(36).slice(2, 8),
+    type: d.type,
+    x, y, rot,
+    flowing: isInStream(x, y) && shouldFlow(d.type, x, y),
+  };
+  if (!piece.flowing) settlePiece(piece, state.placed);
+  state.placed.push(piece);
   state.drag = null;
 }
 

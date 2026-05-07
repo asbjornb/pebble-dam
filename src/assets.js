@@ -5,15 +5,11 @@
 export const ASSETS = {
   background:    { src: "assets/background.png" },
   streamMask:    { src: "assets/stream-mask.png" },
-  paletteBar:    { src: "assets/palette-bar.png" },
   tooltipBubble: { src: "assets/tooltip-bubble.png" },
   cursorHand:    { src: "assets/cursor-hand.png" },
   pieceStick:    { src: "assets/piece-stick.png" },
   piecePebble:   { src: "assets/piece-pebble.png" },
   pieceLeaf:     { src: "assets/piece-leaf.png" },
-  iconStick:     { src: "assets/icon-stick.png" },
-  iconPebble:    { src: "assets/icon-pebble.png" },
-  iconLeaf:      { src: "assets/icon-leaf.png" },
   splash:        { src: "assets/splash.png" },
 };
 
