@@ -83,8 +83,11 @@ function spawnDropRipple(state, piece) {
   if (piece.type !== "pebble" && piece.type !== "stick") return;
   if (!isInStream(piece.x, piece.y)) return;
   const def = PIECE_TYPES[piece.type];
-  // Heavier pieces make a wider ripple. Diameter at peak ~ 1.6× the piece size.
-  const radius = Math.max(def.w, def.h) * 0.85;
+  // Pebbles stick up out of the water so the rock now hides the inner band of
+  // the sprite — give them a wider ring so what's left visibly haloes the
+  // stone. Sticks lie flat enough that the original size still reads.
+  const scale = piece.type === "pebble" ? 1.3 : 0.85;
+  const radius = Math.max(def.w, def.h) * scale;
   state.ripples.push({
     x: piece.x,
     y: piece.y,
