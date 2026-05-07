@@ -18,6 +18,8 @@ const GAP_RESOLUTION = 48; // sample columns across the build line
 
 // Returns:
 //   falls:    [{ x, y, width, strength }]  — a leaky/open run becomes a fall
+//   lateral:  [{ x0, x1, y, dir, strength }] — water sliding sideways along
+//             the dam top to reach a gap (dir = +1 right, -1 left)
 //   pressure: 0..1+ — how clogged the dam is (1 = fully sealed)
 //   damWidth: total wet width across the dam
 export function computeDamState(placed) {
@@ -56,46 +58,105 @@ export function computeDamState(placed) {
   // sticks need a partner; leaves only weakly plug a leak.
   const openness = new Array(cols).fill(0);
   let damWidth = 0;
-  let openSum = 0;
+  let openSumGlobal = 0;
   for (let c = 0; c < cols; c++) {
     if (!wet[c]) continue;
     damWidth += colWidth;
     const o = Math.max(0, 1 - Math.min(1, obstruction[c]));
     openness[c] = o;
-    openSum += o * colWidth;
+    openSumGlobal += o * colWidth;
   }
+  const pressure = damWidth > 0 ? 1 - openSumGlobal / damWidth : 0;
 
-  const pressure = damWidth > 0 ? 1 - openSum / damWidth : 0;
-
-  // Group adjacent leaky columns into waterfalls. Each fall has a
-  // strength = average openness across its columns (1 = wide-open gap,
-  // small numbers = a slow leak through partial coverage).
-  const falls = [];
-  let runStart = -1;
-  let runLeak = 0;
+  // Equilibrium per wet segment: each contiguous run of wet columns acts as
+  // a shared pool. With supply 1 per column, the pool's head H rises until
+  // total outflow (= sum H*openness[c]) matches total supply (= seg width).
+  // So H = nWet / sum(openness). Sealed columns inside the segment hand off
+  // their supply to the open ones — that's the "lateral flow" effect.
+  const out = new Array(cols).fill(0);
+  const segments = [];
+  let segStart = -1;
   for (let c = 0; c <= cols; c++) {
-    const leaking = c < cols && wet[c] && openness[c] > 0.05;
-    if (leaking && runStart === -1) {
-      runStart = c;
-      runLeak = 0;
-    }
-    if (leaking) runLeak += openness[c];
-    if (!leaking && runStart !== -1) {
-      const cx0 = x0 + runStart * colWidth;
-      const cx1 = x0 + c * colWidth;
-      const span = c - runStart;
-      const cx = (cx0 + cx1) / 2;
-      const cy = buildLineSnap(cx);
-      falls.push({
-        x: cx,
-        y: cy,
-        width: cx1 - cx0,
-        strength: runLeak / span,
-      });
-      runStart = -1;
+    const w = c < cols && wet[c];
+    if (w && segStart === -1) segStart = c;
+    if (!w && segStart !== -1) {
+      segments.push({ s: segStart, e: c });
+      segStart = -1;
     }
   }
-  return { falls, pressure, damWidth };
+  for (const seg of segments) {
+    let openSum = 0;
+    for (let c = seg.s; c < seg.e; c++) openSum += openness[c];
+    if (openSum < 1e-4) continue; // segment is totally sealed — no through-flow
+    const H = (seg.e - seg.s) / openSum;
+    for (let c = seg.s; c < seg.e; c++) out[c] = H * openness[c];
+  }
+
+  // Group adjacent open columns into waterfalls. Strength = average through-
+  // flow per column over the run. A small gap downstream of a wide sealed
+  // stretch ends up wider/heavier because sealed columns route water to it.
+  const falls = [];
+  {
+    let runStart = -1;
+    let runOut = 0;
+    for (let c = 0; c <= cols; c++) {
+      const open = c < cols && wet[c] && openness[c] > 0.05;
+      if (open && runStart === -1) { runStart = c; runOut = 0; }
+      if (open) runOut += out[c];
+      if (!open && runStart !== -1) {
+        const cx0 = x0 + runStart * colWidth;
+        const cx1 = x0 + c * colWidth;
+        const span = c - runStart;
+        const cx = (cx0 + cx1) / 2;
+        const cy = buildLineSnap(cx);
+        falls.push({
+          x: cx,
+          y: cy,
+          width: cx1 - cx0,
+          strength: Math.min(1.4, runOut / span),
+        });
+        runStart = -1;
+      }
+    }
+  }
+
+  // Lateral runs: stretches of sealed dam where water has to slide along the
+  // top to reach a gap. Direction picks the nearest open column on either
+  // side within the same wet segment; if both exist, the run splits at its
+  // midpoint.
+  const lateral = [];
+  for (const seg of segments) {
+    let runStart = -1;
+    for (let c = seg.s; c <= seg.e; c++) {
+      const sealed = c < seg.e && openness[c] < 0.1;
+      if (sealed && runStart === -1) runStart = c;
+      if (!sealed && runStart !== -1) {
+        const runEnd = c;
+        let leftOpen = -1, rightOpen = -1;
+        for (let k = runStart - 1; k >= seg.s; k--) {
+          if (openness[k] >= 0.1) { leftOpen = k; break; }
+        }
+        for (let k = runEnd; k < seg.e; k++) {
+          if (openness[k] >= 0.1) { rightOpen = k; break; }
+        }
+        const fx = (i) => x0 + i * colWidth;
+        const strength = Math.min(1, (runEnd - runStart) * colWidth / 220);
+        if (leftOpen >= 0 && rightOpen >= 0) {
+          const mid = Math.floor((runStart + runEnd) / 2);
+          if (mid > runStart) lateral.push({ x0: fx(runStart), x1: fx(mid),    dir: -1, strength });
+          if (mid < runEnd)   lateral.push({ x0: fx(mid),      x1: fx(runEnd), dir:  1, strength });
+        } else if (leftOpen >= 0) {
+          lateral.push({ x0: fx(runStart), x1: fx(runEnd), dir: -1, strength });
+        } else if (rightOpen >= 0) {
+          lateral.push({ x0: fx(runStart), x1: fx(runEnd), dir:  1, strength });
+        }
+        runStart = -1;
+      }
+    }
+  }
+  for (const r of lateral) r.y = buildLineSnap((r.x0 + r.x1) / 2);
+
+  return { falls, pressure, damWidth, lateral };
 }
 
 // Backwards compatible helper used by render.js for clarity.
