@@ -69,10 +69,6 @@ export function computeWaterfalls(placed) {
   return falls;
 }
 
-export function isDamComplete(placed) {
-  return computeWaterfalls(placed).length === 0;
-}
-
 // Per-frame drift for sticks/leaves dropped into open water (not on the dam).
 // Pieces follow the stream tangent until they collide with a stationary piece
 // or leave the canvas.

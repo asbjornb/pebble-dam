@@ -2,7 +2,7 @@ import { loadAssets } from "./assets.js";
 import { makeInitialState } from "./state.js";
 import { render } from "./render.js";
 import { attachInput } from "./input.js";
-import { updateFlow, isDamComplete } from "./water.js";
+import { updateFlow } from "./water.js";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -18,12 +18,7 @@ let assets = null;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     state.t += dt;
-    if (state.won) state.winT += dt;
     updateFlow(state, dt);
-    if (!state.won && isDamComplete(state.placed)) {
-      state.won = true;
-      state.winT = 0;
-    }
     render(ctx, state, assets);
     requestAnimationFrame(frame);
   }

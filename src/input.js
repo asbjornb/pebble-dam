@@ -2,7 +2,6 @@
 // previously-placed pieces to reposition them.
 
 import { W, H, PIECE_TYPES, isInStream, buildLineSnap } from "./state.js";
-import { isDamComplete } from "./water.js";
 
 let canvas, state;
 
@@ -24,11 +23,6 @@ function toLogical(e) {
 }
 
 function onDown(e) {
-  if (state.won) {
-    state.won = false;
-    state.winT = 0;
-    return;
-  }
   const { x, y } = toLogical(e);
   state.showHint = false;
 
@@ -96,10 +90,6 @@ function onUp(e) {
       rot: d.snap.rot,
       flowing: shouldFlow(d.type, d.snap.x, d.snap.y),
     });
-    if (isDamComplete(state.placed) && !state.won) {
-      state.won = true;
-      state.winT = 0;
-    }
   } else if (d.from === "world") {
     // dropped invalid — return it to original location is hard without
     // remembering it. For v1, drop at current pointer position if in stream,

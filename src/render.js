@@ -41,8 +41,6 @@ export function render(ctx, state, assets) {
   // UI: palette, tooltip.
   drawPalette(ctx, state, assets);
   if (state.showHint) drawTooltip(ctx, state, assets);
-
-  if (state.won) drawWin(ctx, state);
 }
 
 // ---------- pieces ----------
@@ -356,21 +354,6 @@ function drawTooltip(ctx, state, assets) {
   ctx.lineTo(x, y + 90);
   ctx.lineTo(x + 8, y + 80);
   ctx.stroke();
-  ctx.restore();
-}
-
-function drawWin(ctx, state) {
-  const a = Math.min(1, state.winT / 1.2);
-  ctx.save();
-  ctx.fillStyle = `rgba(0,0,0,${0.35 * a})`;
-  ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = `rgba(255,250,230,${a})`;
-  ctx.font = "bold 78px serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("The stream is held.", W / 2, H / 2 - 20);
-  ctx.font = "26px serif";
-  ctx.fillText("Click anywhere to keep playing.", W / 2, H / 2 + 40);
   ctx.restore();
 }
 
