@@ -246,8 +246,8 @@ function runsAcrossSection(ss, jets, lateral) {
 
 const FLOW_SPEED = 110;            // px/sec base downstream speed
 const OFFSCREEN_PAD = 80;
-const LEAF_SPAWN_MIN = 4.0;        // min seconds between auto-spawned drifters
-const LEAF_SPAWN_MAX = 8.0;        // max seconds between auto-spawned drifters
+const LEAF_SPAWN_MIN = 5.0;        // min seconds between auto-spawned drifters
+const LEAF_SPAWN_MAX = 10.0;       // max seconds between auto-spawned drifters
 
 // How strongly each piece type pushes passing drifters sideways. Pebbles
 // are solid blockers and shove flow around them; sticks are long and thin
