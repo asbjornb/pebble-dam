@@ -29,10 +29,15 @@ export function settlePiece(piece, placed) {
 
   const tan = streamTangentAt(piece.x, piece.y);
 
-  for (let step = 0; step < STACK_STEPS; step++) {
+  // Only pebbles shove each other out of the way. Sticks and leaves are flat
+  // enough to drape over stones, so they're allowed to overlap freely.
+  const resolvesOverlap = piece.type === "pebble";
+
+  for (let step = 0; step < STACK_STEPS && resolvesOverlap; step++) {
     let mostOverlap = 0;
     for (const q of placed) {
       if (q === piece || q.flowing) continue;
+      if (q.type !== "pebble") continue;
       const qdef = PIECE_TYPES[q.type];
       if (!qdef) continue;
       const dx = piece.x - q.x;
