@@ -1,7 +1,7 @@
 // Renders the world. Uses real images when assets are available; otherwise
 // falls back to procedural shapes so the game is playable without art.
 
-import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, streamTangentAt } from "./state.js";
+import { W, H, STREAM, PIECE_TYPES, streamTangentAt } from "./state.js";
 import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
@@ -44,7 +44,6 @@ export function render(ctx, state, assets) {
     ctx.globalAlpha = 0.85;
     drawPiece(ctx, ghost, assets);
     ctx.globalAlpha = 1;
-    drawDropIndicator(ctx, state);
   }
 
   if (state.showHint) drawTooltip(ctx, state, assets);
@@ -120,23 +119,6 @@ function drawProceduralPiece(ctx, type, def) {
     ctx.strokeStyle = "rgba(0,0,0,0.35)";
     ctx.stroke();
   }
-}
-
-// ---------- drop indicator ----------
-
-function drawDropIndicator(ctx, state) {
-  const d = state.drag;
-  if (!d.snap) return;
-  ctx.save();
-  ctx.translate(d.snap.x, d.snap.y);
-  ctx.rotate(d.snap.rot ?? 0);
-  const def = PIECE_TYPES[d.type];
-  ctx.setLineDash([8, 6]);
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  roundRect(ctx, -def.w / 2 - 4, -def.h / 2 - 4, def.w + 8, def.h + 8, 8);
-  ctx.stroke();
-  ctx.restore();
 }
 
 // ---------- procedural background ----------
@@ -240,7 +222,7 @@ function drawSimpleLeaf(ctx, x, y, rot) {
 
 function drawWaterEffects(ctx, state, assets) {
   const dam = computeDamState(state.placed);
-  drawUpstreamPool(ctx, state.pressure ?? 0);
+  drawUpstreamPool(ctx, state.pressure ?? 0, dam.bottleneck);
   drawLateralRuns(ctx, dam.lateral, state.t, state.pressure ?? 0);
   for (const j of dam.jets) {
     drawGapRush(ctx, j.x, j.y, j.width, j.strength, state.t);
@@ -301,56 +283,64 @@ function drawCaustics(ctx, state, assets) {
   ctx.restore();
 }
 
-// Animated streaks moving along the dam top toward the nearest gap. This is
-// what shows the player that a sealed stretch isn't actually holding water —
-// it's just shoving the flow sideways.
+// Animated streaks moving along a sealed cross-section toward the nearest
+// gap. Each run is an oriented world-space segment (x0,y0)→(x1,y1) — the
+// streaks are drawn in a local frame aligned with the segment so they
+// follow the cross-section direction at the bottleneck.
 function drawLateralRuns(ctx, runs, t, pressure) {
   if (!runs?.length) return;
   const intensity = Math.min(1, 0.4 + pressure * 1.2);
   ctx.save();
   for (const r of runs) {
-    const w = r.x1 - r.x0;
+    const dx = r.x1 - r.x0, dy = r.y1 - r.y0;
+    const w = Math.hypot(dx, dy);
     if (w < 14) continue;
-    const yLine = r.y;
+    const angle = Math.atan2(dy, dx);
+    const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
     const a = r.strength * intensity;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
     ctx.fillStyle = `rgba(170,210,235,${0.18 * a})`;
-    ctx.fillRect(r.x0, yLine - 16, w, 5);
+    ctx.fillRect(-w / 2, -16, w, 5);
     ctx.fillStyle = `rgba(255,255,255,${0.55 * a})`;
     const streakLen = Math.min(28, w * 0.35);
     const streakCount = Math.max(2, Math.floor(w / 38));
     for (let i = 0; i < streakCount; i++) {
       const phase = ((t * 0.9 + i / streakCount) % 1);
-      const sx = r.dir > 0 ? r.x0 + phase * w : r.x1 - phase * w;
+      const sx = r.dir > 0 ? -w / 2 + phase * w : w / 2 - phase * w;
       const fade = Math.sin(phase * Math.PI);
       ctx.globalAlpha = 0.55 * a * fade;
-      ctx.fillRect(sx - streakLen / 2, yLine - 13, streakLen, 2);
+      ctx.fillRect(sx - streakLen / 2, -13, streakLen, 2);
     }
     ctx.globalAlpha = 1;
-    const ax = r.dir > 0 ? r.x1 - 4 : r.x0 + 4;
-    const ay = yLine - 11;
+    const tipX = r.dir > 0 ? w / 2 - 4 : -w / 2 + 4;
+    const tipY = -11;
     ctx.beginPath();
-    ctx.moveTo(ax, ay - 5);
-    ctx.lineTo(ax + 8 * r.dir, ay);
-    ctx.lineTo(ax, ay + 5);
+    ctx.moveTo(tipX, tipY - 5);
+    ctx.lineTo(tipX + 8 * r.dir, tipY);
+    ctx.lineTo(tipX, tipY + 5);
     ctx.closePath();
     ctx.fillStyle = `rgba(220,240,255,${0.75 * a})`;
     ctx.fill();
+    ctx.restore();
   }
   ctx.restore();
 }
 
-// A subtle blue tint above the build line, growing with pressure. Reads as
-// the water "pooling up" behind a dam that's holding back flow.
-function drawUpstreamPool(ctx, pressure) {
+// A subtle blue tint upstream of the bottleneck cross-section, growing with
+// pressure. Reads as the water "pooling up" behind a dam that's holding
+// back flow. Rotated to match the local stream direction so the pool sits
+// behind the actual dam, wherever in the stream the player built it.
+function drawUpstreamPool(ctx, pressure, bottleneck) {
   // Match the backup gate in water.js — water doesn't visibly pool until
   // the dam is mostly sealed.
-  if (pressure <= 0.55) return;
+  if (pressure <= 0.55 || !bottleneck) return;
   const p = Math.min(1, (pressure - 0.55) / 0.45);
   ctx.save();
-  // Build a clip path of the upstream half of the stream.
+  // Clip to the stream silhouette so the tint never bleeds onto the banks.
   const path = STREAM.path;
   ctx.beginPath();
-  // left bank then back along right bank (only points whose y < damLine)
   for (let i = 0; i < path.length; i++) {
     const a = path[i];
     if (i === 0) ctx.moveTo(a.x - a.w / 2, a.y);
@@ -363,19 +353,20 @@ function drawUpstreamPool(ctx, pressure) {
   ctx.closePath();
   ctx.clip();
 
-  // Cut to the area above the dam line.
-  const damY = (BUILD_LINE.yLeft + BUILD_LINE.yRight) / 2;
-  const grad = ctx.createLinearGradient(0, damY - 220, 0, damY + 12);
+  // Local frame at the bottleneck: +x is downstream, -x is upstream.
+  ctx.translate(bottleneck.cx, bottleneck.cy);
+  ctx.rotate(Math.atan2(bottleneck.ty, bottleneck.tx));
+
+  const grad = ctx.createLinearGradient(-220, 0, 12, 0);
   grad.addColorStop(0, `rgba(15,55,85,0)`);
   grad.addColorStop(1, `rgba(15,55,85,${0.45 * p})`);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, damY + 12);
+  ctx.fillRect(-3000, -3000, 3012, 6000);
 
-  // Water rises along the dam edge — render a glossy crest right at the
-  // line so the eye reads "the dam is holding".
+  // Glossy crest right along the dam cross-section.
   ctx.globalCompositeOperation = "lighter";
   ctx.fillStyle = `rgba(180,220,240,${0.12 * p})`;
-  ctx.fillRect(0, damY - 6, W, 6);
+  ctx.fillRect(-3, -3000, 6, 6000);
   ctx.restore();
 }
 

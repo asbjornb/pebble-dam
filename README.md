@@ -35,11 +35,13 @@ work because the JS uses ES modules).
 
 - **Pick up** a stone or stick from the bank (or grab a stick/leaf
   drifting past).
-- **Drop** it into the wet part of the stream. Pieces near the dam line
-  snap onto it; everywhere else they free-place (e.g. a leaf drifting on
-  the surface). You can also drop a piece back onto dry land.
+- **Drop** it anywhere in the stream — there's no snap line, every
+  cross-section of the stream can be a dam. Pebbles sink and stay;
+  sticks/leaves drift unless you drop them touching another piece, in
+  which case they snag in place. You can also drop a piece back onto
+  dry land.
 - **Drag** an already-placed piece to reposition it.
-- Close all gaps along the dam line to clear the level.
+- Wall off any cross-section of the stream to back the water up.
 
 ## Design canvas
 
