@@ -254,33 +254,37 @@ function drawCaustics(ctx, state, assets) {
   ctx.clip();
 
   const frames = a.frames || 8;
-  const fs = a.frameSize || 256;
-  // Crossfade between adjacent frames at ~2.5 fps — stepping discrete frames
-  // at higher rates flickers; blending hides the seams so the highlights
-  // breathe instead of strobing.
-  const phase = state.t * 2.5;
+  // Crossfade between adjacent frames so highlights breathe instead of
+  // strobing. ~4 fps reads as a lively shimmer; the blend hides the seams.
+  const phase = state.t * 4;
   const fi = Math.floor(phase) % frames;
   const fi2 = (fi + 1) % frames;
   const blend = phase - Math.floor(phase);
   ctx.globalCompositeOperation = "screen";
 
-  // Tile a moderate-sized cell across the stream so the texture reads as
-  // shimmering surface rather than one giant stretched image. A slow drift
-  // keeps it from looking pinned to the bed.
-  const tile = 360;
-  const drift = state.t * 6;
-  const ox = -((drift) % tile) - tile;
-  const oy = -((drift * 0.4) % tile) - tile;
-  const baseAlpha = 0.14;
+  // Two tiled layers at different scales drifting in opposite directions.
+  // The parallax keeps the wide mid-section feeling alive — a single layer
+  // there sits as a pair of near-static tiles, so highlights only really
+  // moved at the narrow top/bottom where tile seams crossed the stream.
+  const drift = state.t * 18;
+  drawCausticLayer(ctx, a, fi, fi2, blend, 320, drift, drift * 0.45, 0.16);
+  drawCausticLayer(ctx, a, fi2, fi, 1 - blend, 480, -drift * 0.7, drift * 0.3, 0.11);
+
+  ctx.restore();
+}
+
+function drawCausticLayer(ctx, a, fi, fi2, blend, tile, dx, dy, alpha) {
+  const fs = a.frameSize || 256;
+  const ox = -((dx % tile) + tile) % tile - tile;
+  const oy = -((dy % tile) + tile) % tile - tile;
   for (let ty = oy; ty < H + tile; ty += tile) {
     for (let tx = ox; tx < W + tile; tx += tile) {
-      ctx.globalAlpha = baseAlpha * (1 - blend);
+      ctx.globalAlpha = alpha * (1 - blend);
       ctx.drawImage(a.image, fi * fs, 0, fs, fs, tx, ty, tile, tile);
-      ctx.globalAlpha = baseAlpha * blend;
+      ctx.globalAlpha = alpha * blend;
       ctx.drawImage(a.image, fi2 * fs, 0, fs, fs, tx, ty, tile, tile);
     }
   }
-  ctx.restore();
 }
 
 // Animated streaks moving along a sealed cross-section toward the nearest
