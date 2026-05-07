@@ -2,7 +2,7 @@
 // falls back to procedural shapes so the game is playable without art.
 
 import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, buildLineSnap } from "./state.js";
-import { computeWaterfalls } from "./water.js";
+import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
   ctx.clearRect(0, 0, W, H);
@@ -232,21 +232,66 @@ function drawSimpleLeaf(ctx, x, y, rot) {
 // ---------- water effects (waterfalls + foam) ----------
 
 function drawWaterEffects(ctx, state) {
-  const falls = computeWaterfalls(state.placed);
-  for (const f of falls) {
-    drawWaterfall(ctx, f.x, f.y, f.width, state.t);
+  const dam = computeDamState(state.placed);
+  drawUpstreamPool(ctx, state.pressure ?? 0);
+  for (const f of dam.falls) {
+    drawWaterfall(ctx, f.x, f.y, f.width, f.strength, state.t);
   }
+  drawEddies(ctx, state);
+  drawSplashes(ctx, state);
 }
 
-function drawWaterfall(ctx, cx, cy, width, t) {
+// A subtle blue tint above the build line, growing with pressure. Reads as
+// the water "pooling up" behind a dam that's holding back flow.
+function drawUpstreamPool(ctx, pressure) {
+  if (pressure <= 0.05) return;
+  const p = Math.min(1, pressure);
+  ctx.save();
+  // Build a clip path of the upstream half of the stream.
+  const path = STREAM.path;
+  ctx.beginPath();
+  // left bank then back along right bank (only points whose y < damLine)
+  for (let i = 0; i < path.length; i++) {
+    const a = path[i];
+    if (i === 0) ctx.moveTo(a.x - a.w / 2, a.y);
+    else ctx.lineTo(a.x - a.w / 2, a.y);
+  }
+  for (let i = path.length - 1; i >= 0; i--) {
+    const a = path[i];
+    ctx.lineTo(a.x + a.w / 2, a.y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  // Cut to the area above the dam line.
+  const damY = (BUILD_LINE.yLeft + BUILD_LINE.yRight) / 2;
+  const grad = ctx.createLinearGradient(0, damY - 220, 0, damY + 12);
+  grad.addColorStop(0, `rgba(15,55,85,0)`);
+  grad.addColorStop(1, `rgba(15,55,85,${0.45 * p})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, damY + 12);
+
+  // Water rises along the dam edge — render a glossy crest right at the
+  // line so the eye reads "the dam is holding".
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = `rgba(180,220,240,${0.12 * p})`;
+  ctx.fillRect(0, damY - 6, W, 6);
+  ctx.restore();
+}
+
+function drawWaterfall(ctx, cx, cy, width, strength, t) {
+  // strength 0..1 — partial coverage produces a thin leak instead of a
+  // gushing fall. Width is the geometric gap; visual width also scales
+  // with strength so a half-blocked gap looks half as full.
   ctx.save();
   ctx.translate(cx, cy);
-  // streaks
+  const s = Math.max(0.15, strength);
+  const alpha = 0.35 + 0.6 * s;
   const grd = ctx.createLinearGradient(0, 0, 0, 140);
-  grd.addColorStop(0, "rgba(255,255,255,0.85)");
-  grd.addColorStop(1, "rgba(255,255,255,0.05)");
+  grd.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  grd.addColorStop(1, `rgba(255,255,255,${alpha * 0.05})`);
   ctx.fillStyle = grd;
-  const w = Math.max(20, width * 0.55);
+  const w = Math.max(14, width * (0.30 + 0.30 * s));
   ctx.beginPath();
   ctx.moveTo(-w / 2, 0);
   ctx.quadraticCurveTo(0, 30, w / 2, 0);
@@ -256,14 +301,45 @@ function drawWaterfall(ctx, cx, cy, width, t) {
   ctx.fill();
 
   // moving foam dots at the bottom
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.fillStyle = `rgba(255,255,255,${0.5 + 0.5 * s})`;
   const seed = Math.floor(cx);
-  for (let i = 0; i < 10; i++) {
+  const dots = Math.round(6 + 10 * s);
+  for (let i = 0; i < dots; i++) {
     const phase = (t * 1.5 + (i * 0.37 + seed * 0.013)) % 1;
     const y = 140 - phase * 18;
     const x = ((i * 13 + seed) % w) - w / 2 + Math.sin(t * 2 + i) * 4;
     ctx.beginPath();
-    ctx.arc(x, y, 3 + (1 - phase) * 2, 0, Math.PI * 2);
+    ctx.arc(x, y, 2 + (1 - phase) * 2.2 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawEddies(ctx, state) {
+  if (!state.eddies?.length) return;
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  for (const e of state.eddies) {
+    const a = 1 - e.age / 1.4;
+    ctx.globalAlpha = Math.max(0, a) * 0.6;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, 1.2 + 1.8 * a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSplashes(ctx, state) {
+  if (!state.splashes?.length) return;
+  ctx.save();
+  for (const s of state.splashes) {
+    const k = s.age / s.life;
+    if (k >= 1) continue;
+    const r = (s.big ? 22 : 6) * (0.4 + 0.9 * k);
+    ctx.globalAlpha = (1 - k) * (s.big ? 0.85 : 0.7);
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.beginPath();
+    ctx.arc(s.x, s.y - k * (s.big ? 30 : 14), r, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
