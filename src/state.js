@@ -183,14 +183,14 @@ const GROUND_ITEMS = [
   { type: "pebble", x: 250,  y: 380, rot: -0.10 },
   { type: "pebble", x: 180,  y: 580, rot:  0.30 },
   { type: "pebble", x: 220,  y: 720, rot: -0.05 },
-  { type: "stick",  x: 200,  y: 320, rot:  0.4  },
+  { type: "stick",  x: 180,  y: 400, rot:  0.6  },
   { type: "stick",  x: 140,  y: 660, rot: -0.5  },
   // right bank, near and above the dam line
-  { type: "pebble", x: 1180, y: 460, rot:  0.20 },
-  { type: "pebble", x: 1240, y: 360, rot: -0.18 },
+  { type: "pebble", x: 1170, y: 600, rot:  0.20 },
+  { type: "pebble", x: 1320, y: 800, rot: -0.18 },
   { type: "pebble", x: 1280, y: 540, rot:  0.05 },
-  { type: "stick",  x: 1340, y: 440, rot: -0.6  },
-  { type: "stick",  x: 1380, y: 700, rot:  1.1  },
+  { type: "stick",  x: 1230, y: 700, rot: -0.3  },
+  { type: "stick",  x: 1370, y: 850, rot: -0.4  },
 ];
 
 export function makeInitialState() {
