@@ -12,12 +12,15 @@ import {
   streamTangentAt,
 } from "./state.js";
 
-// ---------- dam coverage / waterfalls ----------
+// ---------- dam coverage / gap flow ----------
 
 const GAP_RESOLUTION = 48; // sample columns across the build line
 
 // Returns:
-//   falls:    [{ x, y, width, strength }]  — a leaky/open run becomes a fall
+//   jets:     [{ x, y, width, strength }] — a gap inside a backed-up dam
+//             becomes a jet of water bursting through (faster, turbulent
+//             flow — not a vertical fall, since the stream surface stays
+//             roughly level on both sides of the dam line)
 //   lateral:  [{ x0, x1, y, dir, strength }] — water sliding sideways along
 //             the dam top to reach a gap (dir = +1 right, -1 left)
 //   pressure: 0..1+ — how clogged the dam is (1 = fully sealed)
@@ -69,8 +72,9 @@ export function computeDamState(placed) {
   const pressure = damWidth > 0 ? 1 - openSumGlobal / damWidth : 0;
 
   // Below this fraction of the dam line being sealed, water doesn't actually
-  // back up — it just flows around scattered obstacles, no waterfall.
-  const FALL_GATE = 0.55;
+  // back up — it just flows around scattered obstacles. Above it, remaining
+  // gaps start to read as jets of fast water bursting through.
+  const BACKUP_GATE = 0.55;
 
   // Equilibrium per wet segment: each contiguous run of wet columns acts as
   // a shared pool. With supply 1 per column, the pool's head H rises until
@@ -98,14 +102,15 @@ export function computeDamState(placed) {
     for (let c = seg.s; c < seg.e; c++) out[c] = H * openness[c];
   }
 
-  // A waterfall only renders at an *interior* gap inside a wet segment that's
-  // mostly sealed — i.e. water has actually backed up and has nowhere to go
-  // but over the gap. Open runs that touch the bank (or live in a segment
-  // that's still mostly open) are just flow passing through the obstacles.
-  const falls = [];
+  // A gap-jet only renders at an *interior* gap inside a wet segment that's
+  // mostly sealed — i.e. water has actually backed up and is being squeezed
+  // through that gap at high velocity (sluice/venturi effect). Open runs
+  // that touch the bank (or live in a segment that's still mostly open) are
+  // just normal flow passing through scattered obstacles, no jet.
+  const jets = [];
   for (const seg of segments) {
-    if (seg.coverage < FALL_GATE) continue;
-    const ramp = Math.min(1, (seg.coverage - FALL_GATE) / (1 - FALL_GATE));
+    if (seg.coverage < BACKUP_GATE) continue;
+    const ramp = Math.min(1, (seg.coverage - BACKUP_GATE) / (1 - BACKUP_GATE));
     let runStart = -1;
     let runOut = 0;
     for (let c = seg.s; c <= seg.e; c++) {
@@ -121,7 +126,7 @@ export function computeDamState(placed) {
           const span = runEnd - runStart;
           const cx = (cx0 + cx1) / 2;
           const cy = buildLineSnap(cx);
-          falls.push({
+          jets.push({
             x: cx,
             y: cy,
             width: cx1 - cx0,
@@ -140,7 +145,7 @@ export function computeDamState(placed) {
   // water just flows past the piece, it isn't being shoved sideways.
   const lateral = [];
   for (const seg of segments) {
-    if (seg.coverage < FALL_GATE) continue;
+    if (seg.coverage < BACKUP_GATE) continue;
     let runStart = -1;
     for (let c = seg.s; c <= seg.e; c++) {
       const sealed = c < seg.e && openness[c] < 0.1;
@@ -171,12 +176,7 @@ export function computeDamState(placed) {
   }
   for (const r of lateral) r.y = buildLineSnap((r.x0 + r.x1) / 2);
 
-  return { falls, pressure, damWidth, lateral };
-}
-
-// Backwards compatible helper used by render.js for clarity.
-export function computeWaterfalls(placed) {
-  return computeDamState(placed).falls;
+  return { jets, pressure, damWidth, lateral };
 }
 
 // ---------- per-frame update ----------
@@ -288,7 +288,7 @@ export function updateFlow(state, dt) {
 
   spawnEddies(state, dt);
   ageSplashes(state, dt);
-  spawnSplashesFor(state, dam.falls);
+  spawnSplashesFor(state, dam.jets);
 }
 
 // ---------- drifters ----------
@@ -406,14 +406,19 @@ function ageSplashes(state, dt) {
   }
 }
 
-function spawnSplashesFor(state, falls) {
-  for (const f of falls) {
-    // emission rate scales with how much water is pouring through
-    const rate = 18 * f.strength * Math.min(1, f.width / 60);
+function spawnSplashesFor(state, jets) {
+  for (const j of jets) {
+    // emission rate scales with how much water is squeezing through
+    const rate = 18 * j.strength * Math.min(1, j.width / 60);
     if (Math.random() > rate * 0.016) continue;
+    // Splash lands a bit downstream of the gap, where the jet breaks up.
+    const tan = streamTangentAt(j.x, j.y);
+    const nx = -tan.dy, ny = tan.dx;
+    const along = 70 + Math.random() * 14;
+    const across = (Math.random() - 0.5) * j.width * 0.6;
     state.splashes.push({
-      x: f.x + (Math.random() - 0.5) * f.width * 0.6,
-      y: f.y + 130 + Math.random() * 14,
+      x: j.x + tan.dx * along + nx * across,
+      y: j.y + tan.dy * along + ny * across,
       age: 0,
       life: 0.5 + Math.random() * 0.3,
       big: false,

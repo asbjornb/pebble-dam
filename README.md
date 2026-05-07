@@ -18,8 +18,9 @@ work because the JS uses ES modules).
 ## What's here
 
 - `index.html`, `src/` — the playable v1. Drag pieces from the bottom-left
-  palette into the stream to build a dam; gaps appear as little
-  waterfalls. Close every gap to win.
+  palette into the stream to build a dam; once it's mostly sealed, water
+  backs up and the remaining gaps show fast turbulent flow rushing
+  through. Close every gap to win.
 - `assets/` — drop generated art here using the filenames in the spec.
   Until then, the game draws procedural placeholder shapes so it stays
   playable.
@@ -48,5 +49,6 @@ screenshot). The canvas scales to fit the viewport. All asset sizes in
 - Multiple levels with different stream shapes and target objectives
   (e.g. "redirect water to the right channel", "make the pond deepen").
 - Real water simulation (cellular fluid) instead of analytical gap math.
-- Sounds (stream loop, plop on placement, splash on waterfall).
+- Sounds (stream loop, plop on placement, splash when water bursts
+  through a gap).
 - Tilt/rotate handles when a piece is selected.

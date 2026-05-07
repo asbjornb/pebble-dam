@@ -16,7 +16,7 @@ export function render(ctx, state, assets) {
 
   // Animated water overlay (subtle ripple) on top of stream bed if no
   // pre-rendered background — otherwise we still draw light highlights on
-  // top of the painted background so waterfalls look alive.
+  // top of the painted background so the stream looks alive.
   drawWaterEffects(ctx, state);
 
   // Dam pieces in placement order.
@@ -229,15 +229,15 @@ function drawSimpleLeaf(ctx, x, y, rot) {
   ctx.restore();
 }
 
-// ---------- water effects (waterfalls + foam) ----------
+// ---------- water effects (gap jets + foam) ----------
 
 function drawWaterEffects(ctx, state) {
   const dam = computeDamState(state.placed);
   drawUpstreamPool(ctx, state.pressure ?? 0);
   drawObstacleFlow(ctx, state);
   drawLateralRuns(ctx, dam.lateral, state.t, state.pressure ?? 0);
-  for (const f of dam.falls) {
-    drawWaterfall(ctx, f.x, f.y, f.width, f.strength, state.t);
+  for (const j of dam.jets) {
+    drawGapRush(ctx, j.x, j.y, j.width, j.strength, state.t);
   }
   drawEddies(ctx, state);
   drawSplashes(ctx, state);
@@ -330,7 +330,7 @@ function drawLateralRuns(ctx, runs, t, pressure) {
 // A subtle blue tint above the build line, growing with pressure. Reads as
 // the water "pooling up" behind a dam that's holding back flow.
 function drawUpstreamPool(ctx, pressure) {
-  // Match the waterfall gate in water.js — water doesn't visibly pool until
+  // Match the backup gate in water.js — water doesn't visibly pool until
   // the dam is mostly sealed.
   if (pressure <= 0.55) return;
   const p = Math.min(1, (pressure - 0.55) / 0.45);
@@ -367,53 +367,67 @@ function drawUpstreamPool(ctx, pressure) {
   ctx.restore();
 }
 
-function drawWaterfall(ctx, cx, cy, width, strength, t) {
-  // strength 0..1 — partial coverage produces a thin leak instead of a
-  // gushing fall. Width is the geometric gap; visual width also scales
-  // with strength so a half-blocked gap looks half as full.
+function drawGapRush(ctx, cx, cy, width, strength, t) {
+  // Fast turbulent flow squeezing through a gap in a backed-up dam — a
+  // sluice/venturi, not a fall. The stream surface stays roughly level on
+  // either side; the gap just accelerates the water passing through it.
+  // strength 0..1 scales how visibly bunched & frothy the rush is; width is
+  // the geometric gap.
+  const tan = streamTangentAt(cx, cy);
+  const angle = Math.atan2(tan.dy, tan.dx);
   ctx.save();
   ctx.translate(cx, cy);
+  ctx.rotate(angle - Math.PI / 2); // local +y is downstream
+
   const s = Math.max(0.18, strength);
   const w = Math.max(14, width * (0.42 + 0.38 * s));
-  const fallH = 110;
+  const len = 95;       // visible downstream extent of the rush
+  const upstream = 22;  // small accelerating zone just before the gap
 
-  // Translucent falling sheet — cool blue-white, fades to mist at the
-  // bottom so there's no hard rectangular edge.
-  const grd = ctx.createLinearGradient(0, 0, 0, fallH);
-  grd.addColorStop(0,    `rgba(190,225,235,${0.42 * s})`);
-  grd.addColorStop(0.55, `rgba(220,235,245,${0.26 * s})`);
+  // Soft accelerated band, brightest at the throat and tapering off
+  // downstream so it doesn't read as a discrete sheet of water.
+  const grd = ctx.createLinearGradient(0, -upstream, 0, len);
+  grd.addColorStop(0,    `rgba(200,225,240,${0.12 * s})`);
+  grd.addColorStop(0.25, `rgba(230,245,255,${0.30 * s})`);
   grd.addColorStop(1,    "rgba(255,255,255,0)");
   ctx.fillStyle = grd;
   ctx.beginPath();
-  ctx.moveTo(-w / 2, 0);
-  ctx.quadraticCurveTo(0, 6, w / 2, 0);
-  ctx.lineTo(w / 2 + 4, fallH);
-  ctx.lineTo(-w / 2 - 4, fallH);
+  ctx.moveTo(-w / 2 - 2, -upstream);
+  ctx.quadraticCurveTo(0, -upstream * 0.4, w / 2 + 2, -upstream);
+  ctx.lineTo(w / 2 + 7, len);
+  ctx.lineTo(-w / 2 - 7, len);
   ctx.closePath();
   ctx.fill();
 
-  // Bright crest at the lip where water tips over.
-  ctx.strokeStyle = `rgba(255,255,255,${0.55 * s})`;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-w / 2, 0);
-  ctx.quadraticCurveTo(0, 6, w / 2, 0);
-  ctx.stroke();
-
-  // Vertical threads of water — staggered phases give the illusion of
-  // running flow without using the foam-dot blobs we had before.
+  // Streaks moving downstream — fast enough to read as accelerated flow
+  // rather than the slow drift on either side.
   const seed = Math.floor(cx * 0.5);
   const streakCount = Math.max(3, Math.round(w / 9));
   for (let i = 0; i < streakCount; i++) {
     const xn = (i + 0.5) / streakCount;
     const sx = -w / 2 + xn * w + Math.sin(t * 2 + i) * 0.6;
-    const speed = 0.85 + ((i * 7 + seed) % 9) * 0.08;
+    const speed = 1.6 + ((i * 7 + seed) % 9) * 0.1;
     const phase = ((t * speed + i * 0.27 + seed * 0.013) % 1);
-    const segLen = 18 + ((i * 5 + seed) % 16);
-    const sy = phase * (fallH - segLen);
-    const a = 0.55 * s * (1 - phase * 0.55);
+    const segLen = 24 + ((i * 5 + seed) % 18);
+    const sy = -upstream + phase * (len - segLen + upstream);
+    const a = 0.5 * s * (1 - phase * 0.6);
     ctx.fillStyle = `rgba(255,255,255,${a})`;
     ctx.fillRect(sx - 0.6, sy, 1.2, segLen);
+  }
+
+  // Foam fringes along the shear lines where the rush meets the dam pieces
+  // on either side — sells "squeezing past stones" rather than "going over".
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      const phase = ((t * 1.4 + i * 0.31 + seed * 0.011 + (side > 0 ? 0.5 : 0)) % 1);
+      const fy = -4 + phase * len;
+      const fx = side * (w / 2 + 1 + Math.sin(t * 3 + i + side) * 1.2);
+      const a = 0.55 * s * (1 - phase) * (1 - phase);
+      ctx.fillStyle = `rgba(255,255,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   ctx.restore();
