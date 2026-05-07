@@ -501,11 +501,11 @@ function drawStoneCurrents(ctx, state) {
     if (p.flowing) continue;
     if (p.type !== "pebble" && p.type !== "stick") continue;
     if (!isInStream(p.x, p.y)) continue;
-    drawCurrentsForPiece(ctx, p, state.t);
+    drawCurrentsForPiece(ctx, p, state.t, state.placed);
   }
 }
 
-function drawCurrentsForPiece(ctx, p, t) {
+function drawCurrentsForPiece(ctx, p, t, placed) {
   const def = PIECE_TYPES[p.type];
   const tan = streamTangentAt(p.x, p.y);
   const angle = Math.atan2(tan.dy, tan.dx);
@@ -534,25 +534,49 @@ function drawCurrentsForPiece(ctx, p, t) {
   // Per-piece phase so neighbouring stones don't pulse in lockstep.
   const seed = Math.floor(p.x * 0.13 + p.y * 0.07);
 
+  // If another piece is sitting right against the upstream face, the bow
+  // shouldn't double up — the neighbour is already deflecting that water.
+  const exposure = bowExposure(p, placed, alongHalf, tan);
+
   ctx.save();
   ctx.translate(p.x, p.y);
   ctx.rotate(angle);
-  drawBowCushion(ctx, alongHalf, crossHalf, t, seed);
-  drawStreamlines(ctx, alongHalf, crossHalf, t, seed);
+  if (exposure > 0.02) drawBowCushion(ctx, alongHalf, crossHalf, t, seed, exposure);
+  drawStreamlines(ctx, p, tan, alongHalf, crossHalf, t, seed);
   ctx.restore();
 }
 
-function drawBowCushion(ctx, alongHalf, crossHalf, t, seed) {
+// 1 if the upstream face is in open water, falling to 0 as another piece
+// crowds it. Suppresses overlapping bow cushions on a stick wedged between
+// two stones, etc.
+function bowExposure(piece, placed, alongHalf, tan) {
+  const bx = piece.x - tan.dx * (alongHalf + 4);
+  const by = piece.y - tan.dy * (alongHalf + 4);
+  let exposure = 1;
+  for (const q of placed) {
+    if (q === piece || q.flowing) continue;
+    const qdef = PIECE_TYPES[q.type];
+    if (!qdef) continue;
+    const r = Math.max(qdef.w, qdef.h) / 2;
+    const d = Math.hypot(bx - q.x, by - q.y);
+    if (d < r) return 0;
+    if (d < r + 28) exposure = Math.min(exposure, (d - r) / 28);
+  }
+  return exposure;
+}
+
+function drawBowCushion(ctx, alongHalf, crossHalf, t, seed, exposure) {
   const pulse = 0.6 + 0.3 * Math.sin(t * 1.6 + seed * 0.1);
+  const k = pulse * exposure;
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  ctx.strokeStyle = `rgba(210, 235, 255, ${0.28 * pulse})`;
+  ctx.strokeStyle = `rgba(210, 235, 255, ${0.18 * k})`;
   ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(-alongHalf - 2, -crossHalf * 0.85);
   ctx.quadraticCurveTo(-alongHalf - 9, 0, -alongHalf - 2, crossHalf * 0.85);
   ctx.stroke();
-  ctx.strokeStyle = `rgba(255, 255, 255, ${0.22 * pulse})`;
+  ctx.strokeStyle = `rgba(255, 255, 255, ${0.14 * k})`;
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.moveTo(-alongHalf - 0.5, -crossHalf * 0.6);
@@ -561,7 +585,7 @@ function drawBowCushion(ctx, alongHalf, crossHalf, t, seed) {
   ctx.restore();
 }
 
-function drawStreamlines(ctx, alongHalf, crossHalf, t, seed) {
+function drawStreamlines(ctx, piece, tan, alongHalf, crossHalf, t, seed) {
   // Gaussian deflection: streaklines bulge outward most at the obstacle and
   // relax back to straight lines well upstream / downstream. sigma controls
   // how concentrated the disturbance is along the flow.
@@ -569,12 +593,15 @@ function drawStreamlines(ctx, alongHalf, crossHalf, t, seed) {
   const xStart = -alongHalf - sigma * 1.3;
   const xEnd   =  alongHalf + sigma * 2.4;
   const range  = xEnd - xStart;
+  const nxw = -tan.dy, nyw = tan.dx;
 
-  // Each band is one lateral offset; closer-in lines bulge more.
+  // Each band is one lateral offset; closer-in lines bulge more. Counts are
+  // intentionally sparse — the per-streak slow blink below means only a
+  // subset is visible at any moment.
   const bands = [
-    { y0: crossHalf * 1.05, D: crossHalf * 0.55, count: 3, alpha: 0.55 },
-    { y0: crossHalf * 1.50, D: crossHalf * 0.35, count: 2, alpha: 0.40 },
-    { y0: crossHalf * 2.05, D: crossHalf * 0.20, count: 2, alpha: 0.28 },
+    { y0: crossHalf * 1.05, D: crossHalf * 0.55, count: 2, alpha: 0.36 },
+    { y0: crossHalf * 1.50, D: crossHalf * 0.35, count: 2, alpha: 0.26 },
+    { y0: crossHalf * 2.05, D: crossHalf * 0.20, count: 1, alpha: 0.18 },
   ];
 
   ctx.save();
@@ -596,8 +623,16 @@ function drawStreamlines(ctx, alongHalf, crossHalf, t, seed) {
         // Fade in at entry, out at exit, so streaks materialize/dissolve
         // rather than popping at the edges of their travel.
         const fade = Math.sin(u * Math.PI);
-        const alpha = band.alpha * fade;
+        // Slow per-streak blink so only some streaks are visible at any
+        // moment — the population breathes instead of running constant.
+        const blink = Math.max(0, Math.sin(t * 0.55 + phase * 6.283 + seed * 0.07));
+        const alpha = band.alpha * fade * blink;
         if (alpha < 0.03) continue;
+        // Skip streaks whose world position is on the bank — currents
+        // shouldn't sparkle on dry ground next to a stone near the edge.
+        const wx = piece.x + tan.dx * x + nxw * y;
+        const wy = piece.y + tan.dy * x + nyw * y;
+        if (!isInStream(wx, wy)) continue;
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(segAngle);
@@ -607,7 +642,7 @@ function drawStreamlines(ctx, alongHalf, crossHalf, t, seed) {
         grd.addColorStop(0.5, `rgba(235,245,255,${alpha})`);
         grd.addColorStop(1,   "rgba(235,245,255,0)");
         ctx.fillStyle = grd;
-        ctx.fillRect(-len / 2, -0.9, len, 1.8);
+        ctx.fillRect(-len / 2, -0.7, len, 1.4);
         ctx.restore();
       }
     }
