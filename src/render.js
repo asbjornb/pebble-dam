@@ -24,6 +24,10 @@ export function render(ctx, state, assets) {
     drawPiece(ctx, p, assets);
   }
 
+  // Drop ripples sit above pieces so the rings read as water displaced
+  // around the stone, not hidden beneath it.
+  drawRipples(ctx, state, assets);
+
   // Drag preview.
   if (state.drag) {
     const ghost = {
@@ -441,6 +445,38 @@ function drawEddies(ctx, state) {
     ctx.beginPath();
     ctx.arc(e.x, e.y, 1.2 + 1.8 * a, 0, Math.PI * 2);
     ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawRipples(ctx, state, assets) {
+  if (!state.ripples?.length) return;
+  const a = assets?.dropRipple;
+  ctx.save();
+  for (const r of state.ripples) {
+    const k = Math.min(0.9999, r.age / r.life);
+    const fadeIn = Math.min(1, r.age / 0.08);
+    const fadeOut = 1 - Math.max(0, (k - 0.7) / 0.3);
+    const alpha = Math.max(0, Math.min(1, fadeIn * fadeOut));
+    if (alpha <= 0) continue;
+    ctx.globalAlpha = alpha;
+    if (a && a.loaded) {
+      const frames = a.frames || 6;
+      const fs = a.frameSize || 128;
+      const fi = Math.min(frames - 1, Math.floor(k * frames));
+      const size = r.radius * 2;
+      ctx.drawImage(
+        a.image,
+        fi * fs, 0, fs, fs,
+        r.x - size / 2, r.y - size / 2, size, size
+      );
+    } else {
+      ctx.strokeStyle = "rgba(230,245,255,0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, r.radius * (0.3 + k * 0.9), r.radius * 0.55 * (0.3 + k * 0.9), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }

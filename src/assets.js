@@ -11,6 +11,7 @@ export const ASSETS = {
   piecePebble:   { src: "assets/piece-pebble.png" },
   pieceLeaf:     { src: "assets/piece-leaf.png" },
   splash:        { src: "assets/splash.png" },
+  dropRipple:    { src: "assets/drop-ripple.png", frames: 6, frameSize: 128 },
 };
 
 export async function loadAssets() {
