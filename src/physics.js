@@ -39,7 +39,12 @@ export function settlePiece(piece, placed) {
       const dy = piece.y - q.y;
       const rx = (def.w + qdef.w) / 2 - TOUCH_SLACK;
       const ry = (def.h + qdef.h) / 2 - TOUCH_SLACK;
-      if (Math.abs(dx) < rx && Math.abs(dy) < ry) {
+      // Elliptical footprint: pebbles are roundish, so the AABB corners are
+      // mostly transparent. Treating overlap as an ellipse lets pieces nestle
+      // diagonally instead of being shoved apart by empty corner pixels.
+      const ex = dx / rx;
+      const ey = dy / ry;
+      if (ex * ex + ey * ey < 1) {
         const overlap = Math.min(rx - Math.abs(dx), ry - Math.abs(dy));
         if (overlap > mostOverlap) mostOverlap = overlap;
       }
