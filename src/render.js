@@ -1,7 +1,7 @@
 // Renders the world. Uses real images when assets are available; otherwise
 // falls back to procedural shapes so the game is playable without art.
 
-import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, buildLineSnap, streamTangentAt } from "./state.js";
+import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, streamTangentAt } from "./state.js";
 import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
@@ -38,8 +38,6 @@ export function render(ctx, state, assets) {
     drawDropIndicator(ctx, state);
   }
 
-  // UI: palette, tooltip.
-  drawPalette(ctx, state, assets);
   if (state.showHint) drawTooltip(ctx, state, assets);
 }
 
@@ -126,7 +124,7 @@ function drawDropIndicator(ctx, state) {
   const def = PIECE_TYPES[d.type];
   ctx.setLineDash([8, 6]);
   ctx.lineWidth = 3;
-  ctx.strokeStyle = d.snap.valid ? "rgba(255,255,255,0.9)" : "rgba(255,80,80,0.9)";
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
   roundRect(ctx, -def.w / 2 - 4, -def.h / 2 - 4, def.w + 8, def.h + 8, 8);
   ctx.stroke();
   ctx.restore();
@@ -465,89 +463,22 @@ function drawSplashes(ctx, state) {
 
 // ---------- UI ----------
 
-function drawPalette(ctx, state, assets) {
-  const x = 60, y = H - 170, w = 420, h = 130;
-  if (assets.paletteBar.loaded) {
-    ctx.drawImage(assets.paletteBar.image, x, y, w, h);
-  } else {
-    ctx.save();
-    ctx.fillStyle = "#e6d4a6";
-    roundRect(ctx, x, y, w, h, 22);
-    ctx.fill();
-    ctx.strokeStyle = "#9a7a48";
-    ctx.lineWidth = 4;
-    ctx.setLineDash([10, 6]);
-    roundRect(ctx, x + 8, y + 8, w - 16, h - 16, 18);
-    ctx.stroke();
-    ctx.restore();
-  }
-  // slots
-  const slotW = 110, slotH = 90;
-  const startX = x + 30, slotY = y + (h - slotH) / 2;
-  for (let i = 0; i < state.palette.length; i++) {
-    const slotX = startX + i * (slotW + 18);
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    roundRect(ctx, slotX, slotY, slotW, slotH, 14);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.restore();
-
-    const type = state.palette[i].id;
-    const def = PIECE_TYPES[type];
-    const cx = slotX + slotW / 2, cy = slotY + slotH / 2;
-    const iconKey = "icon" + type[0].toUpperCase() + type.slice(1);
-    const a = assets[iconKey];
-    if (a && a.loaded) {
-      ctx.drawImage(a.image, cx - slotW / 2 + 10, cy - slotH / 2 + 10, slotW - 20, slotH - 20);
-    } else {
-      ctx.save();
-      ctx.translate(cx, cy);
-      const scale = Math.min((slotW - 24) / def.w, (slotH - 24) / def.h);
-      ctx.scale(scale, scale);
-      drawProceduralPiece(ctx, type, def);
-      ctx.restore();
-    }
-  }
-
-  // remember slot rects on state for input.
-  state._paletteSlots = state.palette.map((p, i) => ({
-    type: p.id,
-    x: startX + i * (slotW + 18),
-    y: slotY,
-    w: slotW,
-    h: slotH,
-  }));
-}
-
 function drawTooltip(ctx, state, assets) {
   const x = 720, y = 120;
   ctx.save();
   if (assets.tooltipBubble.loaded) {
-    ctx.drawImage(assets.tooltipBubble.image, x - 160, y - 50, 320, 100);
+    ctx.drawImage(assets.tooltipBubble.image, x - 200, y - 50, 400, 100);
   } else {
     ctx.fillStyle = "rgba(40,30,20,0.92)";
-    roundRect(ctx, x - 160, y - 50, 320, 100, 16);
+    roundRect(ctx, x - 200, y - 50, 400, 100, 16);
     ctx.fill();
   }
   ctx.fillStyle = "#f7eed7";
   ctx.font = "26px -apple-system, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("Place pieces into", x, y - 12);
-  ctx.fillText("the stream…", x, y + 18);
-  // arrow
-  ctx.strokeStyle = "#f7eed7";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(x, y + 50);
-  ctx.lineTo(x, y + 90);
-  ctx.moveTo(x - 8, y + 80);
-  ctx.lineTo(x, y + 90);
-  ctx.lineTo(x + 8, y + 80);
-  ctx.stroke();
+  ctx.fillText("Drag stones and sticks", x, y - 12);
+  ctx.fillText("from the bank into the stream…", x, y + 18);
   ctx.restore();
 }
 

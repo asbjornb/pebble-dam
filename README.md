@@ -17,10 +17,12 @@ work because the JS uses ES modules).
 
 ## What's here
 
-- `index.html`, `src/` — the playable v1. Drag pieces from the bottom-left
-  palette into the stream to build a dam; once it's mostly sealed, water
-  backs up and the remaining gaps show fast turbulent flow rushing
-  through. Close every gap to win.
+- `index.html`, `src/` — the playable v1. Pick up the stones and sticks
+  scattered on the banks and drag them into the stream to build a dam;
+  once it's mostly sealed, water backs up and the remaining gaps show
+  fast turbulent flow rushing through. Sticks and leaves also drift in
+  from upstream — grab them as they pass to top up your supply. Close
+  every gap to win.
 - `assets/` — drop generated art here using the filenames in the spec.
   Until then, the game draws procedural placeholder shapes so it stays
   playable.
@@ -31,10 +33,11 @@ work because the JS uses ES modules).
 
 ## Gameplay (v1)
 
-- **Pick** a piece from the palette (stick, pebble, leaf).
+- **Pick up** a stone or stick from the bank (or grab a stick/leaf
+  drifting past).
 - **Drop** it into the wet part of the stream. Pieces near the dam line
   snap onto it; everywhere else they free-place (e.g. a leaf drifting on
-  the surface).
+  the surface). You can also drop a piece back onto dry land.
 - **Drag** an already-placed piece to reposition it.
 - Close all gaps along the dam line to clear the level.
 
