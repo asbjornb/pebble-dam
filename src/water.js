@@ -181,16 +181,47 @@ export function updateFlow(state, dt) {
     const p = placed[i];
     if (!p.flowing) continue;
 
+    const defp = PIECE_TYPES[p.type];
     const tan = streamTangentAt(p.x, p.y);
+    const nx = -tan.dy, ny = tan.dx;
+
+    // Deflection field: each non-flowing piece downstream of this drifter
+    // pushes it perpendicular to the current so it slides around the obstacle
+    // instead of sailing straight into it. Cheap stand-in for real flow that
+    // routes water around blockages.
+    let pushPerp = 0;
+    let pushAlong = 0;
+    for (const q of placed) {
+      if (q === p || q.flowing) continue;
+      const qdef = PIECE_TYPES[q.type];
+      if (!qdef) continue;
+      const dx = p.x - q.x, dy = p.y - q.y;
+      const along = dx * tan.dx + dy * tan.dy; // <0 means q is downstream
+      if (along >= 0) continue;
+      const range = (qdef.w + defp.w) * 0.85;
+      const d = Math.hypot(dx, dy);
+      if (d > range || d < 0.5) continue;
+      const f = 1 - d / range;
+      const w = f * f * qdef.obstruction;
+      // perp is the leaf's offset relative to the blocker; sign tells which
+      // side to escape on. If perfectly aligned, pick a side at random so the
+      // leaf commits instead of stalling in front of the stone.
+      const perp = dx * nx + dy * ny;
+      const side = perp !== 0 ? Math.sign(perp) : (Math.random() < 0.5 ? -1 : 1);
+      pushPerp += side * w;
+      pushAlong -= w * 0.35;
+    }
+
     // Speed scales with type — leaves are light, sticks heavier.
-    const speed = FLOW_SPEED * (p.type === "stick" ? 0.85 : 1) *
+    const baseSpeed = FLOW_SPEED * (p.type === "stick" ? 0.85 : 1) *
       (1 + 0.25 * Math.sin(tnow * 1.7 + (p.phase ?? 0)));
-    p.x += tan.dx * speed * dt;
-    p.y += tan.dy * speed * dt;
+    const speed = baseSpeed * Math.max(0.3, 1 + pushAlong);
+    const sideSpeed = baseSpeed * pushPerp * 2.4;
+    p.x += tan.dx * speed * dt + nx * sideSpeed * dt;
+    p.y += tan.dy * speed * dt + ny * sideSpeed * dt;
 
     // Sideways wobble across the current — gives drifters a living wiggle
     // instead of a perfectly straight glide.
-    const nx = -tan.dy, ny = tan.dx;
     const wobble = Math.sin(tnow * 2.4 + (p.phase ?? 0)) * (p.type === "leaf" ? 22 : 8);
     p.x += nx * wobble * dt;
     p.y += ny * wobble * dt;
@@ -205,22 +236,22 @@ export function updateFlow(state, dt) {
       continue;
     }
 
-    // Catch on stationary dam pieces — that's how leaves seal leaks.
+    // Catch on stationary dam pieces — that's how leaves seal leaks. We only
+    // snag against pieces sitting on the dam line (otherwise leaves grab onto
+    // random stones placed off-dam) and use a tighter ellipse for leaves so
+    // they have to actually overlap, not just brush past.
     let snagged = false;
     for (const q of placed) {
       if (q === p || q.flowing) continue;
-      const defp = PIECE_TYPES[p.type];
       const defq = PIECE_TYPES[q.type];
-      const rx = (defp.w + defq.w) * 0.32;
-      const ry = (defp.h + defq.h) * 0.32;
+      const qLineY = buildLineSnap(q.x);
+      if (Math.abs(q.y - qLineY) > 60) continue;
+      const catchScale = p.type === "leaf" ? 0.26 : 0.34;
+      const rx = (defp.w + defq.w) * catchScale;
+      const ry = (defp.h + defq.h) * catchScale;
       const dx = p.x - q.x, dy = p.y - q.y;
       if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) < 1) {
         p.flowing = false;
-        // Snap onto the dam line for a cleaner seal if the catcher is on it.
-        const lineY = buildLineSnap(q.x);
-        if (Math.abs(q.y - lineY) < 60) {
-          p.y = lineY + (Math.random() * 12 - 6);
-        }
         snagged = true;
         break;
       }
@@ -234,7 +265,7 @@ export function updateFlow(state, dt) {
   const smoothing = 1 - Math.exp(-dt * 4);
   state.pressure = (state.pressure ?? 0) * (1 - smoothing) + dam.pressure * smoothing;
 
-  if (state.pressure > 0.7) tryBurst(state, dt);
+  tryBurst(state, dt);
 
   spawnEddies(state, dt);
   ageSplashes(state, dt);
@@ -252,8 +283,10 @@ function spawnDrifters(state, dt) {
   state.leafSpawnT = 0;
   state.nextLeafSpawn = LEAF_SPAWN_MIN + Math.random() * (LEAF_SPAWN_MAX - LEAF_SPAWN_MIN);
 
-  // Spawn at the upstream end of the stream path.
-  const head = { x: 360 + Math.random() * 80 - 40, y: -10 };
+  // Spawn across the full upstream width (peaked toward the middle) so
+  // drifters arrive at the dam from varied positions, not just dead center.
+  const r = Math.random() + Math.random(); // 0..2, peaked at 1
+  const head = { x: 260 + r * 100, y: -10 };
   const type = Math.random() < 0.85 ? "leaf" : "stick";
   state.placed.unshift({
     id: "d-" + Math.random().toString(36).slice(2, 8),
@@ -272,8 +305,9 @@ function spawnDrifters(state, dt) {
 // Pressure pops the weakest stuck piece downstream. Pebbles never burst.
 function tryBurst(state, dt) {
   const p = state.pressure;
-  // Probability per second of a burst event ramps from 0 at p=0.7 to ~3/s at p>=1.5.
-  const ratePerSec = Math.max(0, (p - 0.7) * 3);
+  // Even a slightly leaky dam can wash a stuck leaf off; sticks need more
+  // pressure before they go. Rate ramps from 0 at p=0.15 up to ~3/s at p≈1.0.
+  const ratePerSec = Math.max(0, (p - 0.15) * 3.5);
   if (Math.random() > ratePerSec * dt) return;
 
   let weakest = null;
