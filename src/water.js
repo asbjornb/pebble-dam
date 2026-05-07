@@ -30,15 +30,16 @@ function pieceInWater(p) {
   return isInStream(p.x, p.y);
 }
 
-// Stricter than pieceInWater: every sample along the piece's body must be in
-// the stream. Used for burst eligibility so pieces sitting on land (or with
-// their center on a misclassified bank pixel) can't be torn loose by pressure
-// and start drifting. Pieces that overhang the bank are anchored by it.
-function pieceFullyInWater(p) {
-  for (const s of piecePoints(p)) {
-    if (!isInStream(s.x, s.y)) return false;
-  }
-  return true;
+// Stricter than pieceInWater: the center must be wet and a majority of body
+// samples must be in the stream. Used for burst eligibility so a piece mostly
+// on land is anchored, while a stick with one end grazing the bank is still
+// fair game for the current to tear loose.
+function pieceMostlyInWater(p) {
+  if (!isInStream(p.x, p.y)) return false;
+  const pts = piecePoints(p);
+  let wet = 0;
+  for (const s of pts) if (isInStream(s.x, s.y)) wet++;
+  return wet * 2 > pts.length;
 }
 
 // ---------- dam coverage / gap flow ----------
@@ -416,9 +417,10 @@ function tryBurst(state, dt) {
     if (q.type === "pebble") continue; // stones don't burst
     const def = PIECE_TYPES[q.type];
     if (!def) continue;
-    // Only pieces fully in the water can be torn loose by pressure. A piece
-    // overhanging the bank is anchored by land and shouldn't float off.
-    if (!pieceFullyInWater(q)) continue;
+    // Only pieces mostly in the water can be torn loose by pressure. A piece
+    // sitting largely on land is anchored by the bank and shouldn't float off,
+    // even if its center pixel happens to be classified as water.
+    if (!pieceMostlyInWater(q)) continue;
     const score = def.mass + Math.random() * 0.5; // tie-break randomly
     if (score < weakestScore) {
       weakestScore = score;
