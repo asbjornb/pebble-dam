@@ -148,12 +148,12 @@ function drawProceduralBackground(ctx, t) {
   ctx.beginPath();
   for (let i = 0; i < path.length; i++) {
     const a = path[i];
-    if (i === 0) ctx.moveTo(a.x - STREAM.width / 2, a.y);
-    else ctx.lineTo(a.x - STREAM.width / 2, a.y);
+    if (i === 0) ctx.moveTo(a.x - a.w / 2, a.y);
+    else ctx.lineTo(a.x - a.w / 2, a.y);
   }
   for (let i = path.length - 1; i >= 0; i--) {
     const a = path[i];
-    ctx.lineTo(a.x + STREAM.width / 2, a.y);
+    ctx.lineTo(a.x + a.w / 2, a.y);
   }
   ctx.closePath();
   const sg = ctx.createLinearGradient(0, 0, 0, H);

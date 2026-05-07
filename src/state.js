@@ -2,33 +2,35 @@
 export const W = 1456;
 export const H = 1088;
 
-// The stream is described as a centerline with a width. Water flows along it
-// from top to bottom-right. Pieces only "stick" if they're inside the band.
-// Coordinates eyeballed from the screenshot.
+// The stream is described as a centerline with a per-point full width. Water
+// flows along it from upper-left down to bottom-right. Pieces only "stick" if
+// they're inside the band. Geometry sampled from assets/stream-mask.png.
 export const STREAM = {
-  // centerline points (x, y) from upstream to downstream
+  // centerline points from upstream to downstream; w is the full wet width at
+  // that point (interpolated linearly along each segment).
   path: [
-    { x: 720,  y: -40 },
-    { x: 690,  y: 180 },
-    { x: 600,  y: 360 },
-    { x: 540,  y: 560 },
-    { x: 620,  y: 760 },
-    { x: 800,  y: 900 },
-    { x: 980,  y: 1040 },
-    { x: 1120, y: 1140 },
+    { x: 360,  y: -40,  w: 220 },
+    { x: 460,  y: 80,   w: 220 },
+    { x: 560,  y: 180,  w: 250 },
+    { x: 660,  y: 300,  w: 480 },
+    { x: 690,  y: 420,  w: 690 },
+    { x: 700,  y: 520,  w: 680 },
+    { x: 780,  y: 660,  w: 670 },
+    { x: 880,  y: 820,  w: 650 },
+    { x: 1080, y: 970,  w: 620 },
+    { x: 1240, y: 1130, w: 480 },
   ],
-  width: 280, // half-width of the wet area
 };
 
-// The "build line" is where the dam can be placed (matches the row of stones
-// across the stream in the screenshot). y center plus a tilt.
+// The "build line" is where the dam can be placed. Sits across the wide,
+// roughly horizontal middle stretch of the stream.
 export const BUILD_LINE = {
   // y at left edge and right edge of the band; pieces that snap onto the dam
   // anchor to this line.
-  yLeft: 540,
-  yRight: 470,
-  xLeft: 360,
-  xRight: 1080,
+  yLeft: 470,
+  yRight: 440,
+  xLeft: 340,
+  xRight: 1020,
 };
 
 export const PIECE_TYPES = {
@@ -56,8 +58,15 @@ export function isInStream(x, y) {
   const path = STREAM.path;
   for (let i = 0; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1];
-    const d = pointToSegmentDistance(x, y, a.x, a.y, b.x, b.y);
-    if (d <= STREAM.width / 2) return true;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) continue;
+    let t = ((x - a.x) * dx + (y - a.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a.x + t * dx, cy = a.y + t * dy;
+    const d = Math.hypot(x - cx, y - cy);
+    const w = a.w + t * (b.w - a.w);
+    if (d <= w / 2) return true;
   }
   return false;
 }
