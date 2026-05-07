@@ -6,7 +6,6 @@ export const ASSETS = {
   background:    { src: "assets/background.png" },
   streamMask:    { src: "assets/stream-mask.png" },
   paletteBar:    { src: "assets/palette-bar.png" },
-  levelCard:     { src: "assets/level-card.png" },
   tooltipBubble: { src: "assets/tooltip-bubble.png" },
   cursorHand:    { src: "assets/cursor-hand.png" },
   pieceStick:    { src: "assets/piece-stick.png" },

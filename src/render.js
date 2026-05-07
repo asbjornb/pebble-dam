@@ -38,9 +38,8 @@ export function render(ctx, state, assets) {
     drawDropIndicator(ctx, state);
   }
 
-  // UI: palette, level card, tooltip.
+  // UI: palette, tooltip.
   drawPalette(ctx, state, assets);
-  drawLevelCard(ctx, state, assets);
   if (state.showHint) drawTooltip(ctx, state, assets);
 
   if (state.won) drawWin(ctx, state);
@@ -329,44 +328,6 @@ function drawPalette(ctx, state, assets) {
     w: slotW,
     h: slotH,
   }));
-}
-
-function drawLevelCard(ctx, state, assets) {
-  const x = W - 230, y = H - 230, w = 180, h = 180;
-  if (assets.levelCard.loaded) {
-    ctx.drawImage(assets.levelCard.image, x, y, w, h);
-  } else {
-    ctx.save();
-    ctx.fillStyle = "#efe4c2";
-    ctx.translate(x + w / 2, y + h / 2);
-    ctx.rotate(0.06);
-    ctx.fillRect(-w / 2, -h / 2, w, h);
-    ctx.strokeStyle = "#8c6f3c";
-    ctx.lineWidth = 3;
-    ctx.strokeRect(-w / 2, -h / 2, w, h);
-    // tape
-    ctx.fillStyle = "rgba(220,200,140,0.7)";
-    ctx.fillRect(-30, -h / 2 - 8, 60, 18);
-    // doodle of a stream + dam
-    ctx.strokeStyle = "#4a3a18";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-50, -30);
-    ctx.bezierCurveTo(-30, 0, 30, 0, 50, -30);
-    ctx.moveTo(-50, 30);
-    ctx.bezierCurveTo(-30, 60, 30, 60, 50, 30);
-    ctx.stroke();
-    ctx.fillStyle = "#4a3a18";
-    for (let i = -3; i <= 3; i++) {
-      ctx.beginPath();
-      ctx.arc(i * 14, 0, 6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.font = "16px serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Level 1", 0, h / 2 - 18);
-    ctx.restore();
-  }
 }
 
 function drawTooltip(ctx, state, assets) {
