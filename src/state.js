@@ -153,17 +153,6 @@ export function initStreamColorModel(backgroundImage) {
   streamBinaryMap = { data: out, width: c.width, height: c.height };
 }
 
-// The "build line" is where the dam can be placed. Sits across the wide,
-// roughly horizontal middle stretch of the stream.
-export const BUILD_LINE = {
-  // y at left edge and right edge of the band; pieces that snap onto the dam
-  // anchor to this line.
-  yLeft: 470,
-  yRight: 440,
-  xLeft: 340,
-  xRight: 1020,
-};
-
 // `obstruction` is how strongly a piece blocks flow when it sits on the dam:
 // pebbles are heavy and seal hard, sticks bridge gaps, leaves only lightly
 // plug a leak before bursting under pressure. `mass` is how reluctant a piece
@@ -300,19 +289,42 @@ export function streamTangentAt(x, y) {
   return bestTan;
 }
 
-// Distance from a placement to the dam build line (used to snap pieces onto
-// the dam). Returns { dist, snapY } in image space.
-export function buildLineSnap(x) {
-  const t = (x - BUILD_LINE.xLeft) / (BUILD_LINE.xRight - BUILD_LINE.xLeft);
-  const y = BUILD_LINE.yLeft + (BUILD_LINE.yRight - BUILD_LINE.yLeft) * t;
-  return y;
-}
+// Sample stations along the stream centerline at fixed arc-length spacing.
+// Each station defines a cross-section (centered on the path, oriented
+// perpendicular to local flow) used by the water sim to detect dam coverage.
+let cachedStations = null;
+let cachedStationsStep = null;
 
-function pointToSegmentDistance(px, py, ax, ay, bx, by) {
-  const dx = bx - ax, dy = by - ay;
-  const lenSq = dx * dx + dy * dy;
-  let t = lenSq === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  const cx = ax + t * dx, cy = ay + t * dy;
-  return Math.hypot(px - cx, py - cy);
+export function streamStations(step = 40) {
+  if (cachedStations && cachedStationsStep === step) return cachedStations;
+  const path = STREAM.path;
+  const stations = [];
+  let totalArc = 0;
+  let nextS = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+    if (segLen === 0) continue;
+    const tx = (b.x - a.x) / segLen;
+    const ty = (b.y - a.y) / segLen;
+    while (nextS <= totalArc + segLen) {
+      const local = nextS - totalArc;
+      const t = local / segLen;
+      const cx = a.x + t * (b.x - a.x);
+      const cy = a.y + t * (b.y - a.y);
+      const w = a.w + t * (b.w - a.w);
+      stations.push({
+        s: nextS,
+        cx, cy,
+        tx, ty,
+        nx: -ty, ny: tx,
+        width: w,
+      });
+      nextS += step;
+    }
+    totalArc += segLen;
+  }
+  cachedStations = stations;
+  cachedStationsStep = step;
+  return stations;
 }

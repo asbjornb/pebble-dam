@@ -1,7 +1,7 @@
 // Pointer input: pick up pieces (ground items, placed dam pieces, or
 // drifters floating past) and drop them somewhere new.
 
-import { W, H, PIECE_TYPES, isInStream, buildLineSnap } from "./state.js";
+import { W, H, PIECE_TYPES, isInStream } from "./state.js";
 import { settlePiece } from "./physics.js";
 
 let canvas, state;
@@ -38,11 +38,8 @@ function onDown(e) {
         offsetX: x - p.x,
         offsetY: y - p.y,
         rot: p.rot ?? 0,
-        snap: null,
       };
-      // remove from world while dragging
       state.placed.splice(i, 1);
-      updateSnap();
       canvas.setPointerCapture(e.pointerId);
       return;
     }
@@ -54,26 +51,22 @@ function onMove(e) {
   const { x, y } = toLogical(e);
   state.drag.x = x;
   state.drag.y = y;
-  updateSnap();
 }
 
 function onUp(e) {
   if (!state.drag) return;
   const d = state.drag;
-  // Drops on the dam line use the snapped position; everywhere else (free
-  // float in the stream, or back on the dry bank) the piece keeps the
-  // pointer position.
-  const useSnap = d.snap && d.snap.valid;
-  const x = useSnap ? d.snap.x : d.x;
-  const y = useSnap ? d.snap.y : d.y;
-  const rot = useSnap ? d.snap.rot : d.rot;
   const piece = {
     id: "p-" + Math.random().toString(36).slice(2, 8),
     type: d.type,
-    x, y, rot,
-    flowing: isInStream(x, y) && shouldFlow(d.type, x, y),
+    x: d.x, y: d.y, rot: d.rot ?? 0,
+    flowing: false,
   };
-  if (!piece.flowing) settlePiece(piece, state.placed);
+  if (isInStream(d.x, d.y) && shouldFlow(d.type, d.x, d.y, state.placed)) {
+    piece.flowing = true;
+  } else {
+    settlePiece(piece, state.placed);
+  }
   state.placed.push(piece);
   spawnDropRipple(state, piece);
   state.drag = null;
@@ -97,38 +90,21 @@ function spawnDropRipple(state, piece) {
   });
 }
 
-// Sticks and leaves dropped off the dam line drift with the current; pebbles
-// sink and stay where they're placed.
-function shouldFlow(type, x, y) {
-  if (type !== "stick" && type !== "leaf") return false;
-  const lineY = buildLineSnap(x);
-  return Math.abs(y - lineY) > 30;
-}
-
-function updateSnap() {
-  const d = state.drag;
-  // Snap to dam build line when close.
-  const snapY = buildLineSnap(d.x);
-  const distToDamLine = Math.abs(d.y - snapY);
-  const onDam = distToDamLine < 90;
-  const tilt = Math.atan2(-30, 680); // matches BUILD_LINE slope, ~ -0.044 rad
-  if (onDam && d.x > 320 && d.x < 1040) {
-    const ghost = {
-      type: d.type,
-      x: d.x,
-      y: snapY,
-      rot: d.type === "stick" ? tilt : (d.type === "leaf" ? (d.rot ?? 0) : 0),
-    };
-    settlePiece(ghost, state.placed);
-    d.snap = {
-      x: ghost.x,
-      y: ghost.y,
-      rot: ghost.rot,
-      valid: isInStream(ghost.x, ghost.y),
-    };
-  } else {
-    // Free-place anywhere wet (e.g., a leaf drifting on the surface).
-    const valid = isInStream(d.x, d.y);
-    d.snap = { x: d.x, y: d.y, rot: d.rot ?? 0, valid };
+// Sticks and leaves dropped in open water drift with the current. Pebbles
+// always sink. If a stick or leaf is dropped touching another placed piece,
+// it snags in place rather than drifting.
+function shouldFlow(type, x, y, placed) {
+  if (type === "pebble") return false;
+  const def = PIECE_TYPES[type];
+  for (const q of placed) {
+    if (q.flowing) continue;
+    const qdef = PIECE_TYPES[q.type];
+    if (!qdef) continue;
+    const dx = x - q.x;
+    const dy = y - q.y;
+    const rx = (def.w + qdef.w) * 0.45;
+    const ry = (def.h + qdef.h) * 0.45;
+    if (Math.abs(dx) < rx && Math.abs(dy) < ry) return false;
   }
+  return true;
 }

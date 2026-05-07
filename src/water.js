@@ -5,11 +5,10 @@
 
 import {
   W, H,
-  BUILD_LINE,
   PIECE_TYPES,
-  buildLineSnap,
   isInStream,
   streamTangentAt,
+  streamStations,
 } from "./state.js";
 
 // Pieces dropped on land never count as part of the dam, never burst, and
@@ -22,74 +21,113 @@ function pieceInWater(p) {
 
 // ---------- dam coverage / gap flow ----------
 
-const GAP_RESOLUTION = 48; // sample columns across the build line
+const STATION_STEP = 40;        // arc-length spacing between sampled stations
+const NUM_COLS = 24;            // sample columns across each cross-section
+const BACKUP_GATE = 0.55;       // below this coverage water doesn't back up
 
 // Returns:
-//   jets:     [{ x, y, width, strength }] — a gap inside a backed-up dam
-//             becomes a jet of water bursting through (faster, turbulent
-//             flow — not a vertical fall, since the stream surface stays
-//             roughly level on both sides of the dam line)
-//   lateral:  [{ x0, x1, y, dir, strength }] — water sliding sideways along
-//             the dam top to reach a gap (dir = +1 right, -1 left)
-//   pressure: 0..1+ — how clogged the dam is (1 = fully sealed)
-//   damWidth: total wet width across the dam
+//   jets:     [{ x, y, width, strength }] — a gap inside a backed-up
+//             cross-section becomes a jet of water bursting through.
+//   lateral:  [{ x0,y0, x1,y1, dir, strength }] — water sliding sideways
+//             along the dam top to reach a gap, oriented in world coords.
+//   pressure: 0..1 — bottleneck cross-section coverage (1 = fully sealed).
+//   bottleneck: { cx, cy, tx, ty } — the most-blocked cross-section, or null.
 export function computeDamState(placed) {
-  const x0 = BUILD_LINE.xLeft;
-  const x1 = BUILD_LINE.xRight;
-  const cols = GAP_RESOLUTION;
-  const colWidth = (x1 - x0) / cols;
-  const obstruction = new Array(cols).fill(0); // -1 = land, otherwise sum
-  const wet = new Array(cols).fill(false);
+  const stations = streamStations(STATION_STEP);
 
-  for (let c = 0; c < cols; c++) {
-    const cx = x0 + (c + 0.5) * colWidth;
-    const cy = buildLineSnap(cx);
-    if (isInStream(cx, cy)) wet[c] = true;
-    else obstruction[c] = -1;
-  }
+  // Per-station coverage analysis. Each station is a cross-section
+  // perpendicular to local flow; we sample NUM_COLS points across it and
+  // accumulate obstruction from any non-flowing piece that overlaps.
+  const stationStates = [];
+  for (const st of stations) {
+    const halfW = st.width / 2;
+    const colWidth = st.width / NUM_COLS;
+    const obstruction = new Array(NUM_COLS).fill(0);
+    const wet = new Array(NUM_COLS).fill(false);
 
-  for (const p of placed) {
-    if (p.flowing) continue; // drifting things don't count as dam
-    const def = PIECE_TYPES[p.type];
-    if (!def) continue;
-    const lineY = buildLineSnap(p.x);
-    if (Math.abs(p.y - lineY) > 60) continue;
-    const halfW = def.w / 2;
-    const left = p.x - halfW;
-    const right = p.x + halfW;
-    const startCol = Math.floor((left - x0) / colWidth);
-    const endCol = Math.ceil((right - x0) / colWidth);
-    for (let c = Math.max(0, startCol); c < Math.min(cols, endCol); c++) {
-      if (obstruction[c] === -1) continue;
-      obstruction[c] += def.obstruction;
+    for (let c = 0; c < NUM_COLS; c++) {
+      const off = -halfW + (c + 0.5) * colWidth;
+      const sx = st.cx + st.nx * off;
+      const sy = st.cy + st.ny * off;
+      if (isInStream(sx, sy)) wet[c] = true;
+      else obstruction[c] = -1;
     }
+
+    for (const p of placed) {
+      if (p.flowing) continue;
+      const def = PIECE_TYPES[p.type];
+      if (!def) continue;
+      // Project piece center into station-local frame: along = downstream,
+      // perp = across the flow.
+      const dx = p.x - st.cx, dy = p.y - st.cy;
+      const along = dx * st.tx + dy * st.ty;
+      const perp = dx * st.nx + dy * st.ny;
+      const reach = Math.max(def.w, def.h) / 2;
+      if (Math.abs(along) > reach) continue;
+      // Falloff so a piece contributes most strongly to its nearest station
+      // and tapers off as the cross-section moves past it. Without this each
+      // piece would seal multiple adjacent stations equally, inflating
+      // bottleneck pressure.
+      const alongFrac = 1 - Math.min(1, Math.abs(along) / reach);
+      const contrib = def.obstruction * alongFrac;
+      const left = perp - reach;
+      const right = perp + reach;
+      const cStart = Math.floor((left + halfW) / colWidth);
+      const cEnd = Math.ceil((right + halfW) / colWidth);
+      for (let c = Math.max(0, cStart); c < Math.min(NUM_COLS, cEnd); c++) {
+        if (obstruction[c] === -1) continue;
+        obstruction[c] += contrib;
+      }
+    }
+
+    const openness = new Array(NUM_COLS).fill(0);
+    let totalWet = 0;
+    let totalOpen = 0;
+    for (let c = 0; c < NUM_COLS; c++) {
+      if (!wet[c]) continue;
+      totalWet += colWidth;
+      const o = Math.max(0, 1 - Math.min(1, obstruction[c]));
+      openness[c] = o;
+      totalOpen += o * colWidth;
+    }
+    const coverage = totalWet > 0 ? 1 - totalOpen / totalWet : 0;
+    stationStates.push({ st, openness, wet, coverage, colWidth, halfW });
   }
 
-  // Per-column openness (0..1). Pebbles fully seal a column on their own;
-  // sticks need a partner; leaves only weakly plug a leak.
-  const openness = new Array(cols).fill(0);
-  let damWidth = 0;
-  let openSumGlobal = 0;
-  for (let c = 0; c < cols; c++) {
-    if (!wet[c]) continue;
-    damWidth += colWidth;
-    const o = Math.max(0, 1 - Math.min(1, obstruction[c]));
-    openness[c] = o;
-    openSumGlobal += o * colWidth;
+  // Pressure is driven by the bottleneck: water can only back up as much as
+  // the tightest cross-section allows. Spreading pieces along the stream
+  // doesn't compound — you have to actually wall off one section.
+  let bottleneck = null;
+  for (const ss of stationStates) {
+    if (!bottleneck || ss.coverage > bottleneck.coverage) bottleneck = ss;
   }
-  const pressure = damWidth > 0 ? 1 - openSumGlobal / damWidth : 0;
+  const pressure = bottleneck ? bottleneck.coverage : 0;
 
-  // Below this fraction of the dam line being sealed, water doesn't actually
-  // back up — it just flows around scattered obstacles. Above it, remaining
-  // gaps start to read as jets of fast water bursting through.
-  const BACKUP_GATE = 0.55;
+  const jets = [];
+  const lateral = [];
+  if (bottleneck && bottleneck.coverage >= BACKUP_GATE) {
+    runsAcrossSection(bottleneck, jets, lateral);
+  }
 
-  // Equilibrium per wet segment: each contiguous run of wet columns acts as
-  // a shared pool. With supply 1 per column, the pool's head H rises until
-  // total outflow (= sum H*openness[c]) matches total supply (= seg width).
-  // So H = nWet / sum(openness). Sealed columns inside the segment hand off
-  // their supply to the open ones — that's the "lateral flow" effect.
-  const out = new Array(cols).fill(0);
+  return {
+    jets,
+    pressure,
+    lateral,
+    bottleneck: bottleneck ? {
+      cx: bottleneck.st.cx, cy: bottleneck.st.cy,
+      tx: bottleneck.st.tx, ty: bottleneck.st.ty,
+    } : null,
+  };
+}
+
+// Per wet segment of a cross-section, distribute incoming flow across open
+// columns (sealed columns hand their share to neighbours — the "lateral
+// flow" effect) and emit jets for interior gaps + lateral runs for sealed
+// stretches.
+function runsAcrossSection(ss, jets, lateral) {
+  const { st, openness, wet, colWidth, halfW } = ss;
+  const cols = NUM_COLS;
+
   const segments = [];
   let segStart = -1;
   for (let c = 0; c <= cols; c++) {
@@ -100,25 +138,29 @@ export function computeDamState(placed) {
       segStart = -1;
     }
   }
+
+  const out = new Array(cols).fill(0);
   for (const seg of segments) {
     let openSum = 0;
     for (let c = seg.s; c < seg.e; c++) openSum += openness[c];
     seg.openSum = openSum;
     seg.coverage = 1 - openSum / (seg.e - seg.s);
-    if (openSum < 1e-4) continue; // segment is totally sealed — no through-flow
+    if (openSum < 1e-4) continue;
     const H = (seg.e - seg.s) / openSum;
     for (let c = seg.s; c < seg.e; c++) out[c] = H * openness[c];
   }
 
-  // A gap-jet only renders at an *interior* gap inside a wet segment that's
-  // mostly sealed — i.e. water has actually backed up and is being squeezed
-  // through that gap at high velocity (sluice/venturi effect). Open runs
-  // that touch the bank (or live in a segment that's still mostly open) are
-  // just normal flow passing through scattered obstacles, no jet.
-  const jets = [];
+  const offFor = (c) => -halfW + c * colWidth;
+  const ptFor = (c) => ({
+    x: st.cx + st.nx * offFor(c),
+    y: st.cy + st.ny * offFor(c),
+  });
+
   for (const seg of segments) {
     if (seg.coverage < BACKUP_GATE) continue;
-    const ramp = Math.min(1, (seg.coverage - BACKUP_GATE) / (1 - BACKUP_GATE));
+    const segRamp = Math.min(1, (seg.coverage - BACKUP_GATE) / (1 - BACKUP_GATE));
+
+    // Jets: open runs interior to a backed-up segment.
     let runStart = -1;
     let runOut = 0;
     for (let c = seg.s; c <= seg.e; c++) {
@@ -129,62 +171,51 @@ export function computeDamState(placed) {
         const runEnd = c;
         const interior = runStart > seg.s && runEnd < seg.e;
         if (interior) {
-          const cx0 = x0 + runStart * colWidth;
-          const cx1 = x0 + runEnd * colWidth;
+          const cmid = (runStart + runEnd) / 2;
           const span = runEnd - runStart;
-          const cx = (cx0 + cx1) / 2;
-          const cy = buildLineSnap(cx);
+          const p = ptFor(cmid);
           jets.push({
-            x: cx,
-            y: cy,
-            width: cx1 - cx0,
-            strength: Math.min(1.4, runOut / span) * ramp,
+            x: p.x,
+            y: p.y,
+            width: span * colWidth,
+            strength: Math.min(1.4, runOut / span) * segRamp,
           });
         }
         runStart = -1;
       }
     }
-  }
 
-  // Lateral runs: stretches of sealed dam where water has to slide along the
-  // top to reach a gap. Direction picks the nearest open column on either
-  // side within the same wet segment; if both exist, the run splits at its
-  // midpoint. Only meaningful when the segment is mostly sealed — otherwise
-  // water just flows past the piece, it isn't being shoved sideways.
-  const lateral = [];
-  for (const seg of segments) {
-    if (seg.coverage < BACKUP_GATE) continue;
-    let runStart = -1;
+    // Lateral: sealed stretches slide flow toward the nearest gap.
+    let sealStart = -1;
     for (let c = seg.s; c <= seg.e; c++) {
       const sealed = c < seg.e && openness[c] < 0.1;
-      if (sealed && runStart === -1) runStart = c;
-      if (!sealed && runStart !== -1) {
-        const runEnd = c;
+      if (sealed && sealStart === -1) sealStart = c;
+      if (!sealed && sealStart !== -1) {
+        const sealEnd = c;
         let leftOpen = -1, rightOpen = -1;
-        for (let k = runStart - 1; k >= seg.s; k--) {
+        for (let k = sealStart - 1; k >= seg.s; k--) {
           if (openness[k] >= 0.1) { leftOpen = k; break; }
         }
-        for (let k = runEnd; k < seg.e; k++) {
+        for (let k = sealEnd; k < seg.e; k++) {
           if (openness[k] >= 0.1) { rightOpen = k; break; }
         }
-        const fx = (i) => x0 + i * colWidth;
-        const strength = Math.min(1, (runEnd - runStart) * colWidth / 220);
+        const strength = Math.min(1, (sealEnd - sealStart) * colWidth / 220);
+        const ptStart = ptFor(sealStart);
+        const ptEnd = ptFor(sealEnd);
         if (leftOpen >= 0 && rightOpen >= 0) {
-          const mid = Math.floor((runStart + runEnd) / 2);
-          if (mid > runStart) lateral.push({ x0: fx(runStart), x1: fx(mid),    dir: -1, strength });
-          if (mid < runEnd)   lateral.push({ x0: fx(mid),      x1: fx(runEnd), dir:  1, strength });
+          const mid = Math.floor((sealStart + sealEnd) / 2);
+          const ptMid = ptFor(mid);
+          if (mid > sealStart) lateral.push({ x0: ptStart.x, y0: ptStart.y, x1: ptMid.x, y1: ptMid.y, dir: -1, strength });
+          if (mid < sealEnd)   lateral.push({ x0: ptMid.x,   y0: ptMid.y,   x1: ptEnd.x, y1: ptEnd.y, dir:  1, strength });
         } else if (leftOpen >= 0) {
-          lateral.push({ x0: fx(runStart), x1: fx(runEnd), dir: -1, strength });
+          lateral.push({ x0: ptStart.x, y0: ptStart.y, x1: ptEnd.x, y1: ptEnd.y, dir: -1, strength });
         } else if (rightOpen >= 0) {
-          lateral.push({ x0: fx(runStart), x1: fx(runEnd), dir:  1, strength });
+          lateral.push({ x0: ptStart.x, y0: ptStart.y, x1: ptEnd.x, y1: ptEnd.y, dir:  1, strength });
         }
-        runStart = -1;
+        sealStart = -1;
       }
     }
   }
-  for (const r of lateral) r.y = buildLineSnap((r.x0 + r.x1) / 2);
-
-  return { jets, pressure, damWidth, lateral };
 }
 
 // ---------- per-frame update ----------
@@ -354,11 +385,7 @@ function tryBurst(state, dt) {
     if (q.type === "pebble") continue; // stones don't burst
     const def = PIECE_TYPES[q.type];
     if (!def) continue;
-    const lineY = buildLineSnap(q.x);
-    if (Math.abs(q.y - lineY) > 60) continue;
-    // Only pieces actually in the water can be torn loose by pressure. Without
-    // this, a stick resting on the bank near the dam-line Y still qualifies
-    // and gets washed off the moment any pressure builds up.
+    // Only pieces actually in the water can be torn loose by pressure.
     if (!pieceInWater(q)) continue;
     const score = def.mass + Math.random() * 0.5; // tie-break randomly
     if (score < weakestScore) {
