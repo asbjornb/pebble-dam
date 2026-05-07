@@ -107,8 +107,8 @@ export function computeWaterfalls(placed) {
 
 const FLOW_SPEED = 110;            // px/sec base downstream speed
 const OFFSCREEN_PAD = 80;
-const LEAF_SPAWN_INTERVAL = 1.8;   // seconds between auto-spawned drifters
-const LEAF_DRIFT_CAP = 18;         // max simultaneous auto-spawned leaves
+const LEAF_SPAWN_MIN = 4.0;        // min seconds between auto-spawned drifters
+const LEAF_SPAWN_MAX = 8.0;        // max seconds between auto-spawned drifters
 
 export function updateFlow(state, dt) {
   spawnDrifters(state, dt);
@@ -184,14 +184,12 @@ export function updateFlow(state, dt) {
 
 function spawnDrifters(state, dt) {
   state.leafSpawnT = (state.leafSpawnT ?? 0) + dt;
-  if (state.leafSpawnT < LEAF_SPAWN_INTERVAL) return;
+  if (state.nextLeafSpawn == null) {
+    state.nextLeafSpawn = LEAF_SPAWN_MIN + Math.random() * (LEAF_SPAWN_MAX - LEAF_SPAWN_MIN);
+  }
+  if (state.leafSpawnT < state.nextLeafSpawn) return;
   state.leafSpawnT = 0;
-
-  const drifterCount = state.placed.reduce(
-    (n, p) => n + (p.flowing && p.auto ? 1 : 0),
-    0,
-  );
-  if (drifterCount >= LEAF_DRIFT_CAP) return;
+  state.nextLeafSpawn = LEAF_SPAWN_MIN + Math.random() * (LEAF_SPAWN_MAX - LEAF_SPAWN_MIN);
 
   // Spawn at the upstream end of the stream path.
   const head = { x: 360 + Math.random() * 80 - 40, y: -10 };
