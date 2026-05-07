@@ -1,5 +1,5 @@
 import { loadAssets } from "./assets.js";
-import { makeInitialState } from "./state.js";
+import { makeInitialState, initStreamMask, initStreamColorModel } from "./state.js";
 import { render } from "./render.js";
 import { attachInput } from "./input.js";
 import { updateFlow } from "./water.js";
@@ -12,6 +12,8 @@ let assets = null;
 
 (async function main() {
   assets = await loadAssets();
+  if (assets.streamMask?.loaded) initStreamMask(assets.streamMask.image);
+  if (assets.background?.loaded) initStreamColorModel(assets.background.image);
   attachInput(canvas, state);
   let last = performance.now();
   function frame(now) {
