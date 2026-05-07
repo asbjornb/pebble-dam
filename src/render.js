@@ -1,7 +1,7 @@
 // Renders the world. Uses real images when assets are available; otherwise
 // falls back to procedural shapes so the game is playable without art.
 
-import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, buildLineSnap } from "./state.js";
+import { W, H, STREAM, BUILD_LINE, PIECE_TYPES, buildLineSnap, streamTangentAt } from "./state.js";
 import { computeDamState } from "./water.js";
 
 export function render(ctx, state, assets) {
@@ -234,12 +234,59 @@ function drawSimpleLeaf(ctx, x, y, rot) {
 function drawWaterEffects(ctx, state) {
   const dam = computeDamState(state.placed);
   drawUpstreamPool(ctx, state.pressure ?? 0);
+  drawObstacleFlow(ctx, state);
   drawLateralRuns(ctx, dam.lateral, state.t, state.pressure ?? 0);
   for (const f of dam.falls) {
     drawWaterfall(ctx, f.x, f.y, f.width, f.strength, state.t);
   }
   drawEddies(ctx, state);
   drawSplashes(ctx, state);
+}
+
+// Bow waves and trailing wakes for stationary pieces in the stream. This is
+// what reads as "water flowing around things" before the dam is sealed —
+// without it a half-built dam looks like inert rocks sitting in still water.
+function drawObstacleFlow(ctx, state) {
+  ctx.save();
+  for (const p of state.placed) {
+    if (p.flowing) continue;
+    if (p.type !== "pebble" && p.type !== "stick") continue;
+    const def = PIECE_TYPES[p.type];
+    const tan = streamTangentAt(p.x, p.y);
+    const nx = -tan.dy, ny = tan.dx;
+    const halfW = def.w / 2;
+
+    // Bow wave: thin bright crescent on the upstream face.
+    const bx = p.x - tan.dx * (halfW + 1);
+    const by = p.y - tan.dy * (halfW + 1);
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(Math.atan2(tan.dy, tan.dx));
+    ctx.strokeStyle = "rgba(255,255,255,0.42)";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(0, 0, halfW * 0.95, Math.PI * 0.6, Math.PI * 1.4);
+    ctx.stroke();
+    ctx.restore();
+
+    // Wake streaks: two curving lines fanning slightly outward downstream.
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = 1.3;
+    const wakeLen = 55 + halfW;
+    for (const side of [-1, 1]) {
+      const sx = p.x + tan.dx * (halfW * 0.4) + nx * side * halfW * 0.7;
+      const sy = p.y + tan.dy * (halfW * 0.4) + ny * side * halfW * 0.7;
+      const cx = sx + tan.dx * wakeLen * 0.55 + nx * side * 10;
+      const cy = sy + tan.dy * wakeLen * 0.55 + ny * side * 10;
+      const ex = sx + tan.dx * wakeLen + nx * side * 3;
+      const ey = sy + tan.dy * wakeLen + ny * side * 3;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(cx, cy, ex, ey);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 // Animated streaks moving along the dam top toward the nearest gap. This is
@@ -283,8 +330,10 @@ function drawLateralRuns(ctx, runs, t, pressure) {
 // A subtle blue tint above the build line, growing with pressure. Reads as
 // the water "pooling up" behind a dam that's holding back flow.
 function drawUpstreamPool(ctx, pressure) {
-  if (pressure <= 0.05) return;
-  const p = Math.min(1, pressure);
+  // Match the waterfall gate in water.js — water doesn't visibly pool until
+  // the dam is mostly sealed.
+  if (pressure <= 0.55) return;
+  const p = Math.min(1, (pressure - 0.55) / 0.45);
   ctx.save();
   // Build a clip path of the upstream half of the stream.
   const path = STREAM.path;
@@ -324,33 +373,49 @@ function drawWaterfall(ctx, cx, cy, width, strength, t) {
   // with strength so a half-blocked gap looks half as full.
   ctx.save();
   ctx.translate(cx, cy);
-  const s = Math.max(0.15, strength);
-  const alpha = 0.35 + 0.6 * s;
-  const grd = ctx.createLinearGradient(0, 0, 0, 140);
-  grd.addColorStop(0, `rgba(255,255,255,${alpha})`);
-  grd.addColorStop(1, `rgba(255,255,255,${alpha * 0.05})`);
+  const s = Math.max(0.18, strength);
+  const w = Math.max(14, width * (0.42 + 0.38 * s));
+  const fallH = 110;
+
+  // Translucent falling sheet — cool blue-white, fades to mist at the
+  // bottom so there's no hard rectangular edge.
+  const grd = ctx.createLinearGradient(0, 0, 0, fallH);
+  grd.addColorStop(0,    `rgba(190,225,235,${0.42 * s})`);
+  grd.addColorStop(0.55, `rgba(220,235,245,${0.26 * s})`);
+  grd.addColorStop(1,    "rgba(255,255,255,0)");
   ctx.fillStyle = grd;
-  const w = Math.max(14, width * (0.30 + 0.30 * s));
   ctx.beginPath();
   ctx.moveTo(-w / 2, 0);
-  ctx.quadraticCurveTo(0, 30, w / 2, 0);
-  ctx.lineTo(w / 2 + 6, 130);
-  ctx.quadraticCurveTo(0, 170, -w / 2 - 6, 130);
+  ctx.quadraticCurveTo(0, 6, w / 2, 0);
+  ctx.lineTo(w / 2 + 4, fallH);
+  ctx.lineTo(-w / 2 - 4, fallH);
   ctx.closePath();
   ctx.fill();
 
-  // moving foam dots at the bottom
-  ctx.fillStyle = `rgba(255,255,255,${0.5 + 0.5 * s})`;
-  const seed = Math.floor(cx);
-  const dots = Math.round(6 + 10 * s);
-  for (let i = 0; i < dots; i++) {
-    const phase = (t * 1.5 + (i * 0.37 + seed * 0.013)) % 1;
-    const y = 140 - phase * 18;
-    const x = ((i * 13 + seed) % w) - w / 2 + Math.sin(t * 2 + i) * 4;
-    ctx.beginPath();
-    ctx.arc(x, y, 2 + (1 - phase) * 2.2 * s, 0, Math.PI * 2);
-    ctx.fill();
+  // Bright crest at the lip where water tips over.
+  ctx.strokeStyle = `rgba(255,255,255,${0.55 * s})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, 0);
+  ctx.quadraticCurveTo(0, 6, w / 2, 0);
+  ctx.stroke();
+
+  // Vertical threads of water — staggered phases give the illusion of
+  // running flow without using the foam-dot blobs we had before.
+  const seed = Math.floor(cx * 0.5);
+  const streakCount = Math.max(3, Math.round(w / 9));
+  for (let i = 0; i < streakCount; i++) {
+    const xn = (i + 0.5) / streakCount;
+    const sx = -w / 2 + xn * w + Math.sin(t * 2 + i) * 0.6;
+    const speed = 0.85 + ((i * 7 + seed) % 9) * 0.08;
+    const phase = ((t * speed + i * 0.27 + seed * 0.013) % 1);
+    const segLen = 18 + ((i * 5 + seed) % 16);
+    const sy = phase * (fallH - segLen);
+    const a = 0.55 * s * (1 - phase * 0.55);
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.fillRect(sx - 0.6, sy, 1.2, segLen);
   }
+
   ctx.restore();
 }
 

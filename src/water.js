@@ -68,6 +68,10 @@ export function computeDamState(placed) {
   }
   const pressure = damWidth > 0 ? 1 - openSumGlobal / damWidth : 0;
 
+  // Below this fraction of the dam line being sealed, water doesn't actually
+  // back up — it just flows around scattered obstacles, no waterfall.
+  const FALL_GATE = 0.55;
+
   // Equilibrium per wet segment: each contiguous run of wet columns acts as
   // a shared pool. With supply 1 per column, the pool's head H rises until
   // total outflow (= sum H*openness[c]) matches total supply (= seg width).
@@ -87,34 +91,43 @@ export function computeDamState(placed) {
   for (const seg of segments) {
     let openSum = 0;
     for (let c = seg.s; c < seg.e; c++) openSum += openness[c];
+    seg.openSum = openSum;
+    seg.coverage = 1 - openSum / (seg.e - seg.s);
     if (openSum < 1e-4) continue; // segment is totally sealed — no through-flow
     const H = (seg.e - seg.s) / openSum;
     for (let c = seg.s; c < seg.e; c++) out[c] = H * openness[c];
   }
 
-  // Group adjacent open columns into waterfalls. Strength = average through-
-  // flow per column over the run. A small gap downstream of a wide sealed
-  // stretch ends up wider/heavier because sealed columns route water to it.
+  // A waterfall only renders at an *interior* gap inside a wet segment that's
+  // mostly sealed — i.e. water has actually backed up and has nowhere to go
+  // but over the gap. Open runs that touch the bank (or live in a segment
+  // that's still mostly open) are just flow passing through the obstacles.
   const falls = [];
-  {
+  for (const seg of segments) {
+    if (seg.coverage < FALL_GATE) continue;
+    const ramp = Math.min(1, (seg.coverage - FALL_GATE) / (1 - FALL_GATE));
     let runStart = -1;
     let runOut = 0;
-    for (let c = 0; c <= cols; c++) {
-      const open = c < cols && wet[c] && openness[c] > 0.05;
+    for (let c = seg.s; c <= seg.e; c++) {
+      const open = c < seg.e && openness[c] > 0.05;
       if (open && runStart === -1) { runStart = c; runOut = 0; }
       if (open) runOut += out[c];
       if (!open && runStart !== -1) {
-        const cx0 = x0 + runStart * colWidth;
-        const cx1 = x0 + c * colWidth;
-        const span = c - runStart;
-        const cx = (cx0 + cx1) / 2;
-        const cy = buildLineSnap(cx);
-        falls.push({
-          x: cx,
-          y: cy,
-          width: cx1 - cx0,
-          strength: Math.min(1.4, runOut / span),
-        });
+        const runEnd = c;
+        const interior = runStart > seg.s && runEnd < seg.e;
+        if (interior) {
+          const cx0 = x0 + runStart * colWidth;
+          const cx1 = x0 + runEnd * colWidth;
+          const span = runEnd - runStart;
+          const cx = (cx0 + cx1) / 2;
+          const cy = buildLineSnap(cx);
+          falls.push({
+            x: cx,
+            y: cy,
+            width: cx1 - cx0,
+            strength: Math.min(1.4, runOut / span) * ramp,
+          });
+        }
         runStart = -1;
       }
     }
@@ -123,9 +136,11 @@ export function computeDamState(placed) {
   // Lateral runs: stretches of sealed dam where water has to slide along the
   // top to reach a gap. Direction picks the nearest open column on either
   // side within the same wet segment; if both exist, the run splits at its
-  // midpoint.
+  // midpoint. Only meaningful when the segment is mostly sealed — otherwise
+  // water just flows past the piece, it isn't being shoved sideways.
   const lateral = [];
   for (const seg of segments) {
+    if (seg.coverage < FALL_GATE) continue;
     let runStart = -1;
     for (let c = seg.s; c <= seg.e; c++) {
       const sealed = c < seg.e && openness[c] < 0.1;
