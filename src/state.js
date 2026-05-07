@@ -146,7 +146,36 @@ export function initStreamColorModel(backgroundImage) {
       out[idx] = wet ? 1 : 0;
     }
   }
-  streamBinaryMap = { data: out, width: c.width, height: c.height };
+
+  // Smooth the lumpy hand-painted banks near the upstream head. The mask was
+  // brushed with scallop-shaped strokes that leave concave bays where drifters
+  // wedge before they can flow into wider water. A small dilation in the upper
+  // rows fills those bays without noticeably widening the channel; below the
+  // fade-out the brush noise is hidden by the wider river and we leave it.
+  const SMOOTH_FADE_Y = 540;
+  const SMOOTH_RADIUS = 4;
+  const smoothed = new Uint8Array(out);
+  for (let y = 0; y < Math.min(c.height, SMOOTH_FADE_Y); y++) {
+    const fade = 1 - y / SMOOTH_FADE_Y;
+    const r = Math.round(SMOOTH_RADIUS * fade);
+    if (r <= 0) continue;
+    for (let x = 0; x < c.width; x++) {
+      const idx = y * c.width + x;
+      if (out[idx]) continue;
+      let wet = false;
+      for (let dy = -r; dy <= r && !wet; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= c.height) continue;
+        for (let dx = -r; dx <= r; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= c.width) continue;
+          if (out[yy * c.width + xx]) { wet = true; break; }
+        }
+      }
+      if (wet) smoothed[idx] = 1;
+    }
+  }
+  streamBinaryMap = { data: smoothed, width: c.width, height: c.height };
 }
 
 // `obstruction` is how strongly a piece blocks flow when it sits on the dam:
