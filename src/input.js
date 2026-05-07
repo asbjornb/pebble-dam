@@ -2,6 +2,7 @@
 // previously-placed pieces to reposition them.
 
 import { W, H, PIECE_TYPES, isInStream, buildLineSnap } from "./state.js";
+import { settlePiece } from "./physics.js";
 
 let canvas, state;
 
@@ -82,25 +83,29 @@ function onUp(e) {
   if (!state.drag) return;
   const d = state.drag;
   if (d.snap && d.snap.valid) {
-    state.placed.push({
+    const piece = {
       id: "p-" + Math.random().toString(36).slice(2, 8),
       type: d.type,
       x: d.snap.x,
       y: d.snap.y,
       rot: d.snap.rot,
       flowing: shouldFlow(d.type, d.snap.x, d.snap.y),
-    });
+    };
+    if (!piece.flowing) settlePiece(piece, state.placed);
+    state.placed.push(piece);
   } else if (d.from === "world") {
     // dropped invalid — return it to original location is hard without
     // remembering it. For v1, drop at current pointer position if in stream,
     // otherwise discard.
     if (isInStream(d.x, d.y)) {
-      state.placed.push({
+      const piece = {
         id: "p-" + Math.random().toString(36).slice(2, 8),
         type: d.type,
         x: d.x, y: d.y, rot: d.rot,
         flowing: shouldFlow(d.type, d.x, d.y),
-      });
+      };
+      if (!piece.flowing) settlePiece(piece, state.placed);
+      state.placed.push(piece);
     }
   }
   state.drag = null;
@@ -116,18 +121,24 @@ function shouldFlow(type, x, y) {
 
 function updateSnap() {
   const d = state.drag;
-  const def = PIECE_TYPES[d.type];
   // Snap to dam build line when close.
   const snapY = buildLineSnap(d.x);
   const distToDamLine = Math.abs(d.y - snapY);
   const onDam = distToDamLine < 90;
   const tilt = Math.atan2(-30, 680); // matches BUILD_LINE slope, ~ -0.044 rad
   if (onDam && d.x > 320 && d.x < 1040) {
-    d.snap = {
+    const ghost = {
+      type: d.type,
       x: d.x,
       y: snapY,
-      rot: d.type === "stick" ? tilt + (Math.random() * 0.06 - 0.03) * 0 : (d.type === "leaf" ? (d.rot ?? 0) : 0),
-      valid: isInStream(d.x, snapY),
+      rot: d.type === "stick" ? tilt : (d.type === "leaf" ? (d.rot ?? 0) : 0),
+    };
+    settlePiece(ghost, state.placed);
+    d.snap = {
+      x: ghost.x,
+      y: ghost.y,
+      rot: ghost.rot,
+      valid: isInStream(ghost.x, ghost.y),
     };
   } else {
     // Free-place anywhere wet (e.g., a leaf drifting on the surface).

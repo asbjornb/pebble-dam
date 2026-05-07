@@ -234,11 +234,50 @@ function drawSimpleLeaf(ctx, x, y, rot) {
 function drawWaterEffects(ctx, state) {
   const dam = computeDamState(state.placed);
   drawUpstreamPool(ctx, state.pressure ?? 0);
+  drawLateralRuns(ctx, dam.lateral, state.t, state.pressure ?? 0);
   for (const f of dam.falls) {
     drawWaterfall(ctx, f.x, f.y, f.width, f.strength, state.t);
   }
   drawEddies(ctx, state);
   drawSplashes(ctx, state);
+}
+
+// Animated streaks moving along the dam top toward the nearest gap. This is
+// what shows the player that a sealed stretch isn't actually holding water —
+// it's just shoving the flow sideways.
+function drawLateralRuns(ctx, runs, t, pressure) {
+  if (!runs?.length) return;
+  const intensity = Math.min(1, 0.4 + pressure * 1.2);
+  ctx.save();
+  for (const r of runs) {
+    const w = r.x1 - r.x0;
+    if (w < 14) continue;
+    const yLine = r.y;
+    const a = r.strength * intensity;
+    ctx.fillStyle = `rgba(170,210,235,${0.18 * a})`;
+    ctx.fillRect(r.x0, yLine - 16, w, 5);
+    ctx.fillStyle = `rgba(255,255,255,${0.55 * a})`;
+    const streakLen = Math.min(28, w * 0.35);
+    const streakCount = Math.max(2, Math.floor(w / 38));
+    for (let i = 0; i < streakCount; i++) {
+      const phase = ((t * 0.9 + i / streakCount) % 1);
+      const sx = r.dir > 0 ? r.x0 + phase * w : r.x1 - phase * w;
+      const fade = Math.sin(phase * Math.PI);
+      ctx.globalAlpha = 0.55 * a * fade;
+      ctx.fillRect(sx - streakLen / 2, yLine - 13, streakLen, 2);
+    }
+    ctx.globalAlpha = 1;
+    const ax = r.dir > 0 ? r.x1 - 4 : r.x0 + 4;
+    const ay = yLine - 11;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay - 5);
+    ctx.lineTo(ax + 8 * r.dir, ay);
+    ctx.lineTo(ax, ay + 5);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(220,240,255,${0.75 * a})`;
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 // A subtle blue tint above the build line, growing with pressure. Reads as
