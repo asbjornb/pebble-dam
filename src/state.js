@@ -33,10 +33,14 @@ export const BUILD_LINE = {
   xRight: 1020,
 };
 
+// `obstruction` is how strongly a piece blocks flow when it sits on the dam:
+// pebbles are heavy and seal hard, sticks bridge gaps, leaves only lightly
+// plug a leak before bursting under pressure. `mass` is how reluctant a piece
+// is to be torn loose by water pressure (pebbles never burst, leaves go first).
 export const PIECE_TYPES = {
-  stick:  { w: 150, h: 36,  label: "Stick"  },
-  pebble: { w: 96,  h: 84,  label: "Pebble" },
-  leaf:   { w: 110, h: 70,  label: "Leaf"   },
+  stick:  { w: 150, h: 36, label: "Stick",  obstruction: 0.6, mass: 3.0 },
+  pebble: { w: 96,  h: 84, label: "Pebble", obstruction: 1.0, mass: 9.0 },
+  leaf:   { w: 110, h: 70, label: "Leaf",   obstruction: 0.35, mass: 0.4 },
 };
 
 export function makeInitialState() {
@@ -50,6 +54,12 @@ export function makeInitialState() {
     drag: null,
     showHint: true,
     t: 0,
+    // pressure ramps up when the dam is well-sealed and is what triggers
+    // dramatic bursts of stuck debris; smoothed for stable rendering.
+    pressure: 0,
+    leafSpawnT: 0,
+    eddies: [],
+    splashes: [],
   };
 }
 
