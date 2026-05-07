@@ -246,8 +246,8 @@ function runsAcrossSection(ss, jets, lateral) {
 
 const FLOW_SPEED = 110;            // px/sec base downstream speed
 const OFFSCREEN_PAD = 80;
-const LEAF_SPAWN_MIN = 4.0;        // min seconds between auto-spawned drifters
-const LEAF_SPAWN_MAX = 8.0;        // max seconds between auto-spawned drifters
+const LEAF_SPAWN_MIN = 5.0;        // min seconds between auto-spawned drifters
+const LEAF_SPAWN_MAX = 10.0;       // max seconds between auto-spawned drifters
 
 // How strongly each piece type pushes passing drifters sideways. Pebbles
 // are solid blockers and shove flow around them; sticks are long and thin
@@ -393,10 +393,11 @@ function spawnDrifters(state, dt) {
   state.leafSpawnT = 0;
   state.nextLeafSpawn = LEAF_SPAWN_MIN + Math.random() * (LEAF_SPAWN_MAX - LEAF_SPAWN_MIN);
 
-  // Spawn across the full upstream width (peaked toward the middle) so
-  // drifters arrive at the dam from varied positions, not just dead center.
+  // Spawn within the narrow upstream band (peaked toward the middle). The top
+  // of the stream is only ~220px wide, so keep margin from the banks here —
+  // wobble and the river fanning out downstream restore variety before the dam.
   const r = Math.random() + Math.random(); // 0..2, peaked at 1
-  const head = { x: 260 + r * 100, y: -10 };
+  const head = { x: 300 + r * 60, y: -10 };
   const type = Math.random() < 0.85 ? "leaf" : "stick";
   state.placed.unshift({
     id: "d-" + Math.random().toString(36).slice(2, 8),
