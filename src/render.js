@@ -347,8 +347,54 @@ function drawUpstreamPool(ctx, pressure, bottleneck) {
   // the dam is mostly sealed.
   if (pressure <= 0.55 || !bottleneck) return;
   const p = Math.min(1, (pressure - 0.55) / 0.45);
+  const curve = bottleneck.curve;
+  if (!curve || curve.length < 2) return;
+
   ctx.save();
-  // Clip to the stream silhouette so the tint never bleeds onto the banks.
+  clipToStream(ctx);
+
+  // Pool polygon: extend each end of the cross-section curve far upstream
+  // along the local flow direction, so the gradient fills only the upstream
+  // side. The curve forms the visible dam boundary.
+  const tx = bottleneck.tx, ty = bottleneck.ty;
+  const FAR = 4000;
+  const a0 = curve[0], aN = curve[curve.length - 1];
+  ctx.beginPath();
+  ctx.moveTo(a0.x - tx * FAR, a0.y - ty * FAR);
+  ctx.lineTo(a0.x, a0.y);
+  for (let i = 1; i < curve.length; i++) ctx.lineTo(curve[i].x, curve[i].y);
+  ctx.lineTo(aN.x - tx * FAR, aN.y - ty * FAR);
+  ctx.closePath();
+  ctx.clip();
+
+  const gx0 = bottleneck.cx - tx * 220;
+  const gy0 = bottleneck.cy - ty * 220;
+  const gx1 = bottleneck.cx + tx * 12;
+  const gy1 = bottleneck.cy + ty * 12;
+  const grad = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+  grad.addColorStop(0, `rgba(15,55,85,0)`);
+  grad.addColorStop(1, `rgba(15,55,85,${0.45 * p})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // Glossy crest stroked along the curve. Re-clip to the stream so the
+  // highlight stops cleanly at the bank instead of overshooting.
+  ctx.save();
+  clipToStream(ctx);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = `rgba(180,220,240,${0.18 * p})`;
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(curve[0].x, curve[0].y);
+  for (let i = 1; i < curve.length; i++) ctx.lineTo(curve[i].x, curve[i].y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function clipToStream(ctx) {
   const path = STREAM.path;
   ctx.beginPath();
   for (let i = 0; i < path.length; i++) {
@@ -362,22 +408,6 @@ function drawUpstreamPool(ctx, pressure, bottleneck) {
   }
   ctx.closePath();
   ctx.clip();
-
-  // Local frame at the bottleneck: +x is downstream, -x is upstream.
-  ctx.translate(bottleneck.cx, bottleneck.cy);
-  ctx.rotate(Math.atan2(bottleneck.ty, bottleneck.tx));
-
-  const grad = ctx.createLinearGradient(-220, 0, 12, 0);
-  grad.addColorStop(0, `rgba(15,55,85,0)`);
-  grad.addColorStop(1, `rgba(15,55,85,${0.45 * p})`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(-3000, -3000, 3012, 6000);
-
-  // Glossy crest right along the dam cross-section.
-  ctx.globalCompositeOperation = "lighter";
-  ctx.fillStyle = `rgba(180,220,240,${0.12 * p})`;
-  ctx.fillRect(-3, -3000, 6, 6000);
-  ctx.restore();
 }
 
 function drawGapRush(ctx, cx, cy, width, strength, t) {

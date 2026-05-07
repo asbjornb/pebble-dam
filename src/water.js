@@ -140,8 +140,42 @@ export function computeDamState(placed) {
     bottleneck: bottleneck ? {
       cx: bottleneck.st.cx, cy: bottleneck.st.cy,
       tx: bottleneck.st.tx, ty: bottleneck.st.ty,
+      curve: bottleneckCurve(bottleneck.st),
     } : null,
   };
+}
+
+// Polyline cross-section through the bottleneck station, sampled to remain
+// locally perpendicular to flow at every point. In a straight stretch this
+// reduces to a single perpendicular cut; where the stream bends, the curve
+// bends with it so the dam line doesn't run straight off into the bank.
+function bottleneckCurve(st) {
+  const stepLen = 22;
+  const reach = Math.max(380, st.width * 0.6);
+  const steps = Math.ceil(reach / stepLen);
+
+  function walk(sign) {
+    const pts = [];
+    let x = st.cx, y = st.cy;
+    let tx = st.tx, ty = st.ty;
+    for (let i = 0; i < steps; i++) {
+      const nx = -ty * sign, ny = tx * sign;
+      x += nx * stepLen;
+      y += ny * stepLen;
+      pts.push({ x, y });
+      const t = streamTangentAt(x, y);
+      // Smooth so a single segment boundary doesn't kink the line.
+      tx = tx * 0.5 + t.dx * 0.5;
+      ty = ty * 0.5 + t.dy * 0.5;
+      const norm = Math.hypot(tx, ty) || 1;
+      tx /= norm; ty /= norm;
+    }
+    return pts;
+  }
+
+  const left = walk(1).reverse();
+  const right = walk(-1);
+  return [...left, { x: st.cx, y: st.cy }, ...right];
 }
 
 // Per wet segment of a cross-section, distribute incoming flow across open
