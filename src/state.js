@@ -98,9 +98,9 @@ export function initStreamColorModel(backgroundImage) {
 
       if (streamMask) {
         const m = (y * streamMask.width + x) * 4;
-        const a = streamMask.pixels[m + 3];
-        if (a >= 200) wet.push({ r, g, b });
-        else if (a <= 20) dry.push({ r, g, b });
+        const ml = 0.2126 * streamMask.pixels[m] + 0.7152 * streamMask.pixels[m + 1] + 0.0722 * streamMask.pixels[m + 2];
+        if (ml >= 200) wet.push({ r, g, b });
+        else if (ml <= 32) dry.push({ r, g, b });
       } else {
         if (isInStream(x, y)) wet.push({ r, g, b });
         else dry.push({ r, g, b });
@@ -129,13 +129,9 @@ export function initStreamColorModel(backgroundImage) {
       let maskVote = null;
       if (streamMask && x < streamMask.width && y < streamMask.height) {
         const m = (y * streamMask.width + x) * 4;
-        const mr = streamMask.pixels[m + 0];
-        const mg = streamMask.pixels[m + 1];
-        const mb = streamMask.pixels[m + 2];
-        const ma = streamMask.pixels[m + 3];
-        const luma = 0.2126 * mr + 0.7152 * mg + 0.0722 * mb;
-        if (ma >= 180) maskVote = true;
-        else if (ma <= 16 && luma < 32) maskVote = false;
+        const luma = 0.2126 * streamMask.pixels[m] + 0.7152 * streamMask.pixels[m + 1] + 0.0722 * streamMask.pixels[m + 2];
+        if (luma >= 200) maskVote = true;
+        else if (luma <= 32) maskVote = false;
       }
 
       const dWater = sqDistRgb(r, g, b, waterMean);
@@ -219,16 +215,11 @@ export function isInStream(x, y) {
     const ix = Math.max(0, Math.min(streamMask.width - 1, Math.round(x)));
     const iy = Math.max(0, Math.min(streamMask.height - 1, Math.round(y)));
     const i = (iy * streamMask.width + ix) * 4;
-    const r = streamMask.pixels[i + 0];
-    const g = streamMask.pixels[i + 1];
-    const b = streamMask.pixels[i + 2];
-    const a = streamMask.pixels[i + 3];
-    // Alpha is usually the most reliable mask channel. Color luma is kept as a
-    // weak extra check in case exported masks are near-transparent antialiased
-    // edges with visible RGB data.
-    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    if (a >= 180) maskVote = true;
-    else if (a <= 16 && luma < 32) maskVote = false;
+    // Mask is a grayscale PNG (white=wet, black=dry). Use luma as the vote;
+    // alpha is unreliable because L-mode PNGs decode to A=255 in canvas.
+    const luma = 0.2126 * streamMask.pixels[i] + 0.7152 * streamMask.pixels[i + 1] + 0.0722 * streamMask.pixels[i + 2];
+    if (luma >= 200) maskVote = true;
+    else if (luma <= 32) maskVote = false;
   }
 
   if (streamColorModel) {
