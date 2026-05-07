@@ -94,6 +94,7 @@ function onUp(e) {
       x: d.snap.x,
       y: d.snap.y,
       rot: d.snap.rot,
+      flowing: shouldFlow(d.type, d.snap.x, d.snap.y),
     });
     if (isDamComplete(state.placed) && !state.won) {
       state.won = true;
@@ -108,10 +109,19 @@ function onUp(e) {
         id: "p-" + Math.random().toString(36).slice(2, 8),
         type: d.type,
         x: d.x, y: d.y, rot: d.rot,
+        flowing: shouldFlow(d.type, d.x, d.y),
       });
     }
   }
   state.drag = null;
+}
+
+// Sticks and leaves dropped off the dam line drift with the current; pebbles
+// sink and stay where they're placed.
+function shouldFlow(type, x, y) {
+  if (type !== "stick" && type !== "leaf") return false;
+  const lineY = buildLineSnap(x);
+  return Math.abs(y - lineY) > 30;
 }
 
 function updateSnap() {

@@ -92,6 +92,29 @@ export function isInStream(x, y) {
   return false;
 }
 
+// Unit downstream direction at (x,y), based on the closest stream segment.
+export function streamTangentAt(x, y) {
+  const path = STREAM.path;
+  let bestD = Infinity;
+  let bestTan = { dx: 0, dy: 1 };
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) continue;
+    let t = ((x - a.x) * dx + (y - a.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a.x + t * dx, cy = a.y + t * dy;
+    const d = Math.hypot(x - cx, y - cy);
+    if (d < bestD) {
+      bestD = d;
+      const len = Math.sqrt(lenSq);
+      bestTan = { dx: dx / len, dy: dy / len };
+    }
+  }
+  return bestTan;
+}
+
 // Distance from a placement to the dam build line (used to snap pieces onto
 // the dam). Returns { dist, snapY } in image space.
 export function buildLineSnap(x) {
