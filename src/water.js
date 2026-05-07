@@ -359,8 +359,18 @@ export function updateFlow(state, dt) {
 
   spawnEddies(state, dt);
   ageSplashes(state, dt);
+  ageSurges(state, dt);
   spawnSplashesFor(state, dam.jets);
   ageRipples(state, dt);
+}
+
+function ageSurges(state, dt) {
+  if (!state.surges) return;
+  for (let i = state.surges.length - 1; i >= 0; i--) {
+    const s = state.surges[i];
+    s.age += dt;
+    if (s.age > s.life) state.surges.splice(i, 1);
+  }
 }
 
 function ageRipples(state, dt) {
@@ -469,13 +479,14 @@ function tryBurst(state, dt) {
 
   weakest.flowing = true;
   weakest.phase = Math.random() * Math.PI * 2;
-  // little kick downstream so the burst reads visually
   const tan = streamTangentAt(weakest.x, weakest.y);
+  // Anchor the surge at the gap the piece just left, then kick the piece
+  // itself downstream so the burst reads visually.
+  const ox = weakest.x, oy = weakest.y;
   weakest.x += tan.dx * 18;
   weakest.y += tan.dy * 18 + 6;
-  // mark the burst location for a foam splash
-  state.splashes.push({
-    x: weakest.x, y: weakest.y, age: 0, life: 0.7, big: true,
+  state.surges.push({
+    x: ox, y: oy, dx: tan.dx, dy: tan.dy, age: 0, life: 0.55,
   });
 }
 

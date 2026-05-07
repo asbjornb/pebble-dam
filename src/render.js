@@ -229,6 +229,7 @@ function drawWaterEffects(ctx, state, assets) {
   }
   drawEddies(ctx, state);
   drawSplashes(ctx, state, assets);
+  drawSurges(ctx, state, assets);
 }
 
 // Slow-cycling caustic tile over the wet stream surface. Adds constant gentle
@@ -482,6 +483,47 @@ function drawRipples(ctx, state, assets) {
       ctx.ellipse(r.x, r.y, r.radius * (0.3 + k * 0.9), r.radius * 0.55 * (0.3 + k * 0.9), 0, 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+  ctx.restore();
+}
+
+function drawSurges(ctx, state, assets) {
+  if (!state.surges?.length) return;
+  const sheet = assets?.surgeSheet;
+  ctx.save();
+  for (const s of state.surges) {
+    const k = s.age / s.life;
+    if (k >= 1) continue;
+    const angle = Math.atan2(s.dy, s.dx);
+    // Sprite is laid out left-to-right; the bright origin sits ~22% from the
+    // left edge. Anchor that point on the burst location so the streak appears
+    // to emerge from the gap and rush downstream.
+    const size = 150;
+    const anchorFrac = 0.22;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(angle);
+    // Slight ease-out fade; full alpha across most of life, then drop.
+    ctx.globalAlpha = Math.min(1, (1 - k) * 1.6);
+    if (sheet && sheet.loaded) {
+      const frames = sheet.frames || 8;
+      const fs = sheet.frameSize || 192;
+      const fi = Math.min(frames - 1, Math.floor(k * frames));
+      ctx.drawImage(
+        sheet.image,
+        fi * fs, 0, fs, fs,
+        -size * anchorFrac, -size / 2, size, size
+      );
+    } else {
+      // Procedural fallback: a tapered streak along +x.
+      const len = size * 0.9 * (0.4 + 0.8 * (1 - Math.abs(k - 0.4)));
+      const grd = ctx.createLinearGradient(0, 0, len, 0);
+      grd.addColorStop(0, "rgba(255,255,255,0.9)");
+      grd.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, -4, len, 8);
+    }
+    ctx.restore();
   }
   ctx.restore();
 }
